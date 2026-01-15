@@ -6,8 +6,34 @@ import polars as pl
 
 
 def mapa_incendios_por_provincia(
-    data_df: pl.DataFrame, provincias_df: gpd.GeoDataFrame, focus: str = None, ccaa: gpd.GeoDataFrame = None
-):
+    data_df: pl.DataFrame,
+    provincias_df: gpd.GeoDataFrame,
+    focus: str = None,
+    ccaa: gpd.GeoDataFrame = None,
+) -> go.Figure:
+    """
+    Genera un mapa coroplético de España mostrando la superficie afectada por incendios
+    en cada provincia. Si se especifica una comunidad autónoma (CCAA), el mapa se centra en esa región
+    y destaca los grandes incendios (superficie >= 500 ha) con marcadores.
+
+    Comportamiento:
+        - Si focus se pasa, el mapa se centra en la CCAA indicada y marca incendios
+        grandes (superficie >= 500 ha). Si focus no existe en provincias_df
+        o ccaa, se produce ValueError (índice vacío).
+        - Usa escala de color en hectáreas; marcas de fuego usan la columna lng/lat.
+        - No modifica los DataFrames de entrada.
+    
+    :param data_df: DataFrame con los datos de incendios
+    :type data_df: pl.DataFrame
+    :param provincias_df: GeoDataFrame con las características geográficas de las provincias
+    :type provincias_df: gpd.GeoDataFrame
+    :param focus: Nombre de la comunidad autónoma para centrar el mapa
+    :type focus: str
+    :param ccaa: GeoDataFrame con las características geográficas de las comunidades autónomas
+    :type ccaa: gpd.GeoDataFrame
+    :return: Figura de Plotly con el mapa coroplético
+    :rtype: go.Figure
+    """
     agg_df = data_df.group_by(["provincia"]).agg(
         [pl.sum("superficie").alias("superficie_total")]
     )
@@ -22,7 +48,6 @@ def mapa_incendios_por_provincia(
             scope="europe",
             # hover_data=...,  # TODO: Añadir alguna cosilla interesante
             color_continuous_scale="Hot_r",
-            title="<b>Superficie Total Afectada por Incendios por Provincia</b>",
         )
         # .add_scattergeo(
         #     lon=provincias["centro_ccaa_lon"],
@@ -35,6 +60,7 @@ def mapa_incendios_por_provincia(
         # )
     )
 
+    # Líneas de las CCAA
     for _, row in ccaa.to_crs(epsg=4326).iterrows():
         geometry = row.geometry
         for g in geometry.geoms if geometry.geom_type == "MultiPolygon" else [geometry]:
@@ -50,6 +76,7 @@ def mapa_incendios_por_provincia(
                 )
             )
 
+    # Enfoque/Zoom en la CCAA seleccionada
     if focus:
         centro_lon = float(
             provincias_df[provincias_df.CCAA == focus].centro_ccaa_lon.iloc[0]
@@ -90,21 +117,37 @@ def mapa_incendios_por_provincia(
             showlegend=False,
         )
     else:
-        fig.update_geos(fitbounds="locations", visible=False, projection_type="times")
+        fig.update_geos(
+            center={"lat": 40.4167, "lon": -3.7033},
+            projection_scale=6.4,
+            visible=False,
+            projection_type="times",
+        )
 
+    # Configuración de leyenda y estética de la figura
     fig.update_layout(
-        margin=dict(r=0, t=50, l=0, b=0),
+        margin=dict(r=0, t=0, l=0, b=0),
         coloraxis_colorbar=dict(
-            title="Superficie (ha)",
+            # Título de la leyenda
+            title="Superficie<br>quemada",
+            title_font_color="white",
+            # Unidades de la leyenda
+            tickfont_color="white",
+            ticks="outside",
+            ticklen=5,
+            # Grosor de la barra de la leyenda
             thicknessmode="pixels",
             thickness=20,
-            lenmode="pixels",
-            len=500,
-            yanchor="top",
-            y=0.95,
-            xanchor="center",
-            x=0.5,
-            orientation="h",
+            # Ajuste de longitud de la barra de la leyenda
+            lenmode="fraction",
+            len=0.9,
+            # Posicionamiento de la leyenda
+            yanchor="middle",
+            y=0.45,
+            xanchor="left",
+            x=0,
+            orientation="v", # Orientación de la leyenda
+            bgcolor="rgba(0,0,0,0.3)",  # Fondo de la leyenda
         ),
         geo_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
@@ -114,8 +157,22 @@ def mapa_incendios_por_provincia(
     return fig
 
 
-def grafico_causas_por_año(fuegos_df: pl.DataFrame):
+def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
+    """
+    Genera un gráfico de áreas apiladas que muestra la evolución porcentual
+    de las causas de incendios a lo largo de los años.
 
+    Comportamiento:
+        - Agrupa por ('año','causa'), cuenta incendios y calcula el porcentaje relativo al total anual 
+            (suma por año = 100% salvo datos faltantes).
+        - Ordena las causas por su media porcentual y asigna colores cíclicamente desde la paleta interna.
+        - Añade etiquetas junto al último año.
+    
+    :param fuegos_df: DataFrame que contiene los datos de incendios
+    :type fuegos_df: pl.DataFrame
+    :return: Figura de Plotly con el gráfico de áreas apiladas
+    :rtype: go.Figure
+    """
     agg = (
         fuegos_df.group_by(["año", "causa"])
         .agg(pl.len().alias("num_incendios"))
@@ -190,8 +247,6 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame):
         )
 
     fig.update_layout(
-        title="<b>Evolución de las causas de incendios</b>",
-        title_font=dict(size=18, color="white"),
         showlegend=False,
         legend_title_text="Causa",
         legend=dict(
@@ -235,7 +290,22 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame):
     return fig
 
 
-def grafico_barras_comparativas(fuegos_df: pl.DataFrame):
+def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
+    """
+    Genera un gráfico de barras horizontales comparando las 10 comunidades
+    autónomas con mayor superficie quemada anual promedio.
+
+    Comportamiento:
+      - Calcula número de años únicos (n_years) y promedia la superficie y cantidad
+        por año para cada comunidad.
+      - Ordena por media anual de superficie y devuelve las 10 primeras.
+      - Añade línea vertical con la media nacional (ha/año) y anotaciones.
+    
+    :param fuegos_df: DataFrame que contiene los datos de incendios
+    :type fuegos_df: pl.DataFrame
+    :return: Figura de Plotly con el gráfico de barras
+    :rtype: go.Figure
+    """
     n_years = fuegos_df.select(pl.col("año").n_unique().alias("n")).get_column("n")[0]
     agg = fuegos_df.group_by("comunidad").agg(
         [
@@ -248,13 +318,17 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame):
         pl.col("superficie_total").sum().alias("total")
     ).get_column("total")[0]
 
-    agg = agg.with_columns(
-        (pl.col("cantidad") / n_years).alias("media_anual_cantidad"),
-        (pl.col("superficie_total") / n_years).alias("media_anual_superficie"),
-        (pl.col("superficie_total") / total_superficie_nacional * 100).alias(
-            "pct_sobre_nacional"
-        ),
-    ).sort("media_anual_superficie", descending=True)
+    agg = (
+        agg.with_columns(
+            (pl.col("cantidad") / n_years).alias("media_anual_cantidad"),
+            (pl.col("superficie_total") / n_years).alias("media_anual_superficie"),
+            (pl.col("superficie_total") / total_superficie_nacional * 100).alias(
+                "pct_sobre_nacional"
+            ),
+        )
+        .sort("media_anual_superficie", descending=True)
+        .head(10)
+    )
 
     comunidades = agg.get_column("comunidad").to_list()
     x_superficie = agg.get_column("media_anual_superficie").to_list()
@@ -305,36 +379,35 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame):
     for i, comunidad in enumerate(comunidades):
         fig.add_annotation(
             xref="paper",
-            x=0.85,
+            x=1.02,
             y=i,
             text=comunidad,
             showarrow=False,
             xanchor="left",
-            xshift=10,
-            font=dict(size=10, color="white"),
-            align="left",
+            xshift=-10,
+            font=dict(size=8, color="white"),
+            align="right",
         )
 
-    for i, (xi, comunidad, mc, pct) in enumerate(
-        zip(x_superficie, comunidades, media_cantidad, pct_nacional)
+    for i, (xi, mc, pct) in enumerate(
+        zip(x_superficie, media_cantidad, pct_nacional)
     ):
         fig.add_annotation(
-            x=xi + 7.5e3,
+            x=xi + 5e3,
             y=i,
             text=f"{mc:.1f} / {pct:.1f}%",
             showarrow=False,
             xanchor="left",
             # xshift=6,
-            font=dict(size=9, color="white"),
+            font=dict(size=8, color="white"),
             valign="middle",
         )
 
     fig.update_layout(
-        title="<b>Media anual de superficie afectada por incendios</b>",
         xaxis=dict(autorange="reversed"),
         yaxis=dict(autorange="reversed", showticklabels=False),
         showlegend=False,
-        margin=dict(l=0, r=30, t=70, b=40),
+        margin=dict(l=0, r=100, t=70, b=40),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="white"),
