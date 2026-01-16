@@ -6,6 +6,7 @@ import polars as pl
 from dash import dcc, html
 
 from plots import (grafico_barras_comparativas, grafico_causas_por_año,
+                   grafico_ditribucion_superficie_incendios,
                    mapa_incendios_por_provincia)
 from processing import CAUSAS, ccaa, fuegos, provincias_df
 from utils import CardStyle, superficie_formateada, tendencia_incendios
@@ -284,33 +285,29 @@ app.layout = dbc.Container(
                     className="mb-3",
                 ),
                 dbc.Col(
-                    id="graficos-polares",
+                    id="grafico-distribucion",
                     children=[
-                        dbc.Row(
+                        dbc.Card(
                             [
-                                dbc.Card(
-                                    [
-                                        dbc.CardBody(
-                                            dcc.Graph(
-                                                figure=fig_polar,
-                                                config={"displayModeBar": False},
-                                            )
-                                        )
-                                    ],
-                                    className="mb-3",
+                                dbc.CardHeader(
+                                    "Distribución de la superficie afectada por incendios mes a mes",
+                                    style={
+                                        "textAlign": "center",
+                                        "fontWeight": "600",
+                                        "fontSize": "1.4rem",
+                                    },
                                 ),
-                                dbc.Card(
-                                    [
-                                        dbc.CardBody(
-                                            dcc.Graph(
-                                                figure=fig_polar,
-                                                config={"displayModeBar": False},
-                                            )
-                                        )
-                                    ]
-                                ),
-                            ]
-                        )
+                                dbc.CardBody(
+                                    dcc.Graph(
+                                        figure=grafico_ditribucion_superficie_incendios(
+                                            fuegos, polar=True
+                                        ),
+                                        config={"displayModeBar": False},
+                                    )
+                                )
+                            ],
+                            className="mb-3",
+                        ),
                     ],
                     xs=12,
                     lg=6,

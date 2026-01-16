@@ -1,8 +1,10 @@
 import dash_bootstrap_components as dbc
 import geopandas as gpd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import polars as pl
+from scipy.stats import gaussian_kde
 
 
 def mapa_incendios_por_provincia(
@@ -412,5 +414,149 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
         # autosize=True,
         # height=900,
     )
+
+    return fig
+
+
+def grafico_ditribucion_superficie_incendios(
+    fuegos_df: pl.DataFrame, polar: bool = False
+) -> go.Figure:
+    """
+    Genera un gráfico que muestra la distribución de la superficie de incendios
+    a lo largo de las semanas del año utilizando una estimación de densidad kernel (KDE).
+
+    Para poder visualizar más cómodamente las distribuciones, se realiza el siguiente procesamiento de los datos:
+        - Para calcular la densidad, solo se consideran incendios con superficie > 20 ha.
+        - Se calcula la KDE para cada semana y se multiplica por la media de superficie de esa semana.
+        - Se interpola la densidad entre semanas para suavizar la visualización.
+
+    Permite visualizarse en formato cartesiano o polar.
+
+    :param fuegos_df: DataFrame que contiene los datos de incendios
+    :type fuegos_df: pl.DataFrame
+    :param polar: Indica si el gráfico debe ser en formato polar o cartesiano
+    :type polar: bool
+    :return: Figura generada
+    :rtype: Figure
+    """
+    x_grid = np.linspace(0, 1000, 500)
+    grupos = (
+        fuegos_df.filter(pl.col("superficie") > 20)
+        .group_by("semana")
+        .agg(pl.col("superficie"))
+        .sort("semana")
+    )
+
+    semanas = grupos["semana"].to_numpy()
+    n_semanas = len(semanas)
+
+    kde_matrix = np.zeros((2 * n_semanas, len(x_grid)))
+    stats_list = np.empty((2 * n_semanas, 2))
+
+    for i, vals in enumerate(grupos["superficie"]):
+        data = np.asanyarray(vals)
+        media = np.mean(data)
+        stats_list[i * 2, 0] = media
+        stats_list[i * 2, 1] = np.median(data)
+        kde = gaussian_kde(data)
+        kde_matrix[i * 2, :] = kde(x_grid) * media
+
+    kde_matrix[1::2, :] = (
+        kde_matrix[0::2, :] + np.vstack([kde_matrix[2::2, :], kde_matrix[0:1, :]])
+    ) / 2
+    # Estilo compartido (usado por ambos modos)
+    base_layout = dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="white"),
+        margin=dict(t=30, b=30, l=40, r=30),
+    )
+
+    if not polar:
+        z = np.sqrt(kde_matrix)
+        fig = go.Figure(
+            data=go.Heatmap(
+                z=z,
+                x=x_grid,
+                y=semanas,
+                colorscale="Hot",
+                colorbar=dict(
+                    title="Densidad KDE",
+                    title_font=dict(color="white"),
+                    tickfont=dict(color="white"),
+                    thickness=20,
+                ),
+            )
+        )
+
+        fig.update_layout(**base_layout)
+        fig.update_xaxes(
+            title_text="Superficie (ha)",
+            title_font=dict(color="white"),
+            tickfont=dict(color="white"),
+            showgrid=False,
+        )
+        fig.update_yaxes(
+            title_text="Semana",
+            title_font=dict(color="white"),
+            tickfont=dict(color="white"),
+            showgrid=False,
+        )
+    else:
+        n = kde_matrix.shape[0]
+        angles = np.linspace(0, 360, n, endpoint=False)
+
+        thetas = []
+        radius = []
+        intensities = []
+
+        for i, theta in enumerate(angles):
+            for j, superficie in enumerate(x_grid):
+                thetas.append(theta)
+                radius.append(superficie)
+                intensities.append(kde_matrix[i, j])
+
+        MAX_MARKER_SIZE = 8
+        MIN_MARKER_SIZE = 0.1
+        r_array = np.array(radius)
+        r_min, r_max = r_array.min(), r_array.max()
+        sizes = (r_array - r_min) / (r_max - r_min + 1e-9) * (
+            MAX_MARKER_SIZE - MIN_MARKER_SIZE
+        ) + MIN_MARKER_SIZE
+
+        fig = go.Figure(
+            go.Scatterpolar(
+                r=radius,
+                theta=thetas,
+                mode="markers",
+                marker=dict(
+                    size=sizes,
+                    color=intensities,
+                    colorscale="Hot",
+                    colorbar=dict(
+                        title="Densidad KDE",
+                        title_font=dict(color="white"),
+                        tickfont=dict(color="white"),
+                        thickness=20,
+                    ),
+                    line_width=0,
+                    opacity=0.9,
+                ),
+            )
+        )
+
+        fig.update_layout(**base_layout)
+        fig.update_layout(
+            polar=dict(
+                bgcolor="rgba(0,0,0,0)",
+                radialaxis=dict(
+                    title="Superficie (ha)",
+                    title_font=dict(color="white"),
+                    tickfont=dict(color="white"),
+                    gridcolor="rgba(255,255,255,0.05)",
+                ),
+                angularaxis=dict(tickfont=dict(color="white")),
+            )
+        )
 
     return fig

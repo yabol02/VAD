@@ -138,6 +138,7 @@ fuegos = fuegos.with_columns(
         pl.col("causa").cast(pl.String, strict=False).replace(CAUSAS).alias("causa"),
         pl.col("fecha").dt.year().alias("año"),
         pl.col("fecha").dt.month().alias("mes"),
+        pl.col("fecha").dt.week().alias("semana"),
     ]
 )
 
