@@ -2,91 +2,7 @@ import geopandas as gpd
 import polars as pl
 from shapely.validation import make_valid
 
-COMUNIDADES = {
-    1: "País Vasco",
-    2: "Cataluña",
-    3: "Galicia",
-    4: "Andalucía",
-    5: "Principado de Asturias",
-    6: "Cantabria",
-    7: "La Rioja",
-    8: "Región de Murcia",
-    9: "Comunitat Valenciana",
-    10: "Aragón",
-    11: "Castilla - La Mancha",
-    12: "Canarias",
-    13: "Comunidad Foral de Navarra",
-    14: "Extremadura",
-    15: "Illes Balears",
-    16: "Comunidad de Madrid",
-    17: "Castilla y León",
-    18: "Ceuta",
-    19: "Melilla",
-}
-
-PROVINCIAS = {
-    1: "Araba",
-    2: "Albacete",
-    3: "Alacant",
-    4: "Almería",
-    5: "Ávila",
-    6: "Badajoz",
-    7: "Illes Balears",
-    8: "Barcelona",
-    9: "Burgos",
-    10: "Cáceres",
-    11: "Cádiz",
-    12: "Castelló",
-    13: "Ciudad Real",
-    14: "Córdoba",
-    15: "A Coruña",
-    16: "Cuenca",
-    17: "Girona",
-    18: "Granada",
-    19: "Guadalajara",
-    20: "Gipuzcoa",
-    21: "Huelva",
-    22: "Huesca",
-    23: "Jaén",
-    24: "León",
-    25: "Lleida",
-    26: "La Rioja",
-    27: "Lugo",
-    28: "Madrid",
-    29: "Málaga",
-    30: "Murcia",
-    31: "Navarra",
-    32: "Ourense",
-    33: "Asturias",
-    34: "Palencia",
-    35: "Las Palmas",
-    36: "Pontevedra",
-    37: "Salamanca",
-    38: "Santa Cruz de Tenerife",
-    39: "Cantabria",
-    40: "Segovia",
-    41: "Sevilla",
-    42: "Soria",
-    43: "Tarragona",
-    44: "Teruel",
-    45: "Toledo",
-    46: "València",
-    47: "Valladolid",
-    48: "Bizkaia",
-    49: "Zamora",
-    50: "Zaragoza",
-    51: "Ceuta",
-    52: "Melilla",
-}
-
-CAUSAS = {
-    1: "Por rayo",
-    2: "Accidente o negligencia",
-    3: "Accidente o negligencia",
-    4: "Intencionado",
-    5: "De origen desconocido",
-    6: "Reproducido",
-}
+from utils import CAUSAS, COMUNIDADES, PROVINCIAS
 
 fuegos = pl.read_csv("./data/fires_all.csv")
 
@@ -114,10 +30,18 @@ fuegos = fuegos.filter(
     pl.col("lat").is_not_null() & pl.col("lng").is_not_null()
 )  # Sitios fuera de España (Francia y Portugal) pero que afectaron al territorio español
 
-fuegos = fuegos.with_columns([
-    pl.when(pl.col("time_ctrl") < 0).then(0).otherwise(pl.col("time_ctrl")).alias("time_ctrl"),
-    pl.when(pl.col("time_ext") < 0).then(0).otherwise(pl.col("time_ext")).alias("time_ext")
-])
+fuegos = fuegos.with_columns(
+    [
+        pl.when(pl.col("time_ctrl") < 0)
+        .then(0)
+        .otherwise(pl.col("time_ctrl"))
+        .alias("time_ctrl"),
+        pl.when(pl.col("time_ext") < 0)
+        .then(0)
+        .otherwise(pl.col("time_ext"))
+        .alias("time_ext"),
+    ]
+)
 
 fuegos = fuegos.with_columns(
     [
