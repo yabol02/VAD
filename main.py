@@ -3,12 +3,12 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.express as px
 import polars as pl
-from dash import dcc, html
+from dash import Input, Output, State, dcc, html
 
 from plots import (grafico_barras_comparativas, grafico_causas_por_año,
                    grafico_ditribucion_superficie_incendios,
                    mapa_incendios_por_provincia)
-from processing import CAUSAS, ccaa, fuegos, provincias_df
+from processing import CAUSAS, COMUNIDADES, ccaa, fuegos, provincias_df
 from utils import CardStyle, superficie_formateada, tendencia_incendios
 
 año_min = fuegos.select(pl.col("año")).min().item()
@@ -95,7 +95,8 @@ app.layout = dbc.Container(
                                                     },
                                                 ),
                                                 html.H2(
-                                                    f"{len(fuegos)}",
+                                                    id="kpi-total",
+                                                    children=f"{len(fuegos)}",
                                                     style={
                                                         "fontSize": "1.4rem",
                                                         "textAlign": "center",
@@ -120,7 +121,10 @@ app.layout = dbc.Container(
                                                     },
                                                 ),
                                                 html.H2(
-                                                    superficie_formateada(fuegos),
+                                                    id="kpi-area",
+                                                    children=superficie_formateada(
+                                                        fuegos
+                                                    ),
                                                     style={
                                                         "fontSize": "1.4rem",
                                                         "textAlign": "center",
@@ -145,7 +149,8 @@ app.layout = dbc.Container(
                                                     },
                                                 ),
                                                 html.H2(
-                                                    f"{fuegos.group_by("año").agg(pl.col("superficie").sum()).sort("superficie", descending=True).item(0, "año")}",
+                                                    id="kpi-año-pico",
+                                                    children=f"{fuegos.group_by("año").agg(pl.col("superficie").sum()).sort("superficie", descending=True).item(0, "año")}",
                                                     style={
                                                         "fontSize": "1.4rem",
                                                         "textAlign": "center",
@@ -170,7 +175,8 @@ app.layout = dbc.Container(
                                                     },
                                                 ),
                                                 html.H2(
-                                                    f"{tendencia_incendios(fuegos)}",
+                                                    id="kpi-tendencia",
+                                                    children=f"{tendencia_incendios(fuegos)}",
                                                     style={
                                                         "fontSize": "1.4rem",
                                                         "textAlign": "center",
@@ -211,6 +217,7 @@ app.layout = dbc.Container(
                                 ),
                                 dbc.CardBody(
                                     dcc.Graph(
+                                        id="graph-mapa",
                                         figure=mapa_incendios_por_provincia(
                                             data_df=fuegos,
                                             provincias_df=provincias_df,
@@ -240,7 +247,8 @@ app.layout = dbc.Container(
                                 ),
                                 dbc.CardBody(
                                     dcc.Graph(
-                                        figure=grafico_barras_comparativas(fuegos)
+                                        id="graph-barras",
+                                        figure=grafico_barras_comparativas(fuegos),
                                     )
                                 ),
                             ]
@@ -272,6 +280,7 @@ app.layout = dbc.Container(
                                 ),
                                 dbc.CardBody(
                                     dcc.Graph(
+                                        id="graph-causas",
                                         figure=grafico_causas_por_año(fuegos),
                                         style={"height": "400px"},
                                     )
@@ -299,12 +308,13 @@ app.layout = dbc.Container(
                                 ),
                                 dbc.CardBody(
                                     dcc.Graph(
+                                        id="graph-distribucion",
                                         figure=grafico_ditribucion_superficie_incendios(
                                             fuegos, polar=True
                                         ),
                                         config={"displayModeBar": False},
                                     )
-                                )
+                                ),
                             ],
                             className="mb-3",
                         ),
@@ -334,6 +344,7 @@ app.layout = dbc.Container(
                                                     children=[
                                                         html.Label("Rango de Años"),
                                                         dcc.RangeSlider(
+                                                            id="slider-años",
                                                             min=año_min,
                                                             max=año_max,
                                                             step=1,
@@ -357,7 +368,8 @@ app.layout = dbc.Container(
                                                             "Comunidad Autónoma"
                                                         ),
                                                         dcc.Dropdown(
-                                                            options=ccaa_options,
+                                                            id="dropdown-ccaa",
+                                                            options=provincias_df.CCAA.unique().tolist(),
                                                             placeholder="Selecciona CCAA",
                                                             style={
                                                                 "color": "black",
@@ -373,6 +385,7 @@ app.layout = dbc.Container(
                                                     children=[
                                                         html.Label("Causa(s)"),
                                                         dcc.Dropdown(
+                                                            id="dropdown-causas",
                                                             options=[
                                                                 {
                                                                     "label": causa,
@@ -397,13 +410,14 @@ app.layout = dbc.Container(
                                                         children=[
                                                             html.Label("Filtro"),
                                                             dbc.Button(
-                                                                "Activar filtros",
+                                                                id="btn-filtrar",
+                                                                children="Activar filtros",
                                                                 color="primary",
                                                                 className="w-100",
                                                             ),
-                                                            dcc.Download(
-                                                                id="download-component"
-                                                            ),
+                                                            # dcc.Download(
+                                                            #     id="download-component"
+                                                            # ),
                                                         ]
                                                     ),
                                                     xs=12,
@@ -449,6 +463,92 @@ app.layout = dbc.Container(
     style={"backgroundColor": "#252222"},
     fluid=True,
 )
+
+
+@app.callback(
+    [
+        Output("graph-mapa", "figure"),
+        # Output("graph-barras", "figure"),
+        Output("graph-causas", "figure"),
+        # Output("graph-distribucion", "figure"),
+        Output("kpi-total", "children"),
+        Output("kpi-area", "children"),
+        Output("kpi-año-pico", "children"),
+        Output("kpi-tendencia", "children"),
+    ],
+    [Input("btn-filtrar", "n_clicks")],
+    [
+        State("slider-años", "value"),
+        State("dropdown-ccaa", "value"),
+        State("dropdown-causas", "value"),
+    ],
+    prevent_initial_call=False,
+)
+def actualizar_dashboard(n_clicks, rango_años, ccaa_seleccionada, causas_seleccionadas):
+    # Crear copia del dataframe original
+    fuegos_filtrado = fuegos
+
+    # Filtro de rango de años
+    if rango_años:
+        fuegos_filtrado = fuegos_filtrado.filter(
+            (pl.col("año") >= min(rango_años)) & (pl.col("año") <= max(rango_años))
+        )
+
+    # Filtro de comunidad autónoma
+    if ccaa_seleccionada:
+        fuegos_filtrado = fuegos_filtrado.filter(
+            pl.col("comunidad")==ccaa_seleccionada
+        )
+
+    # Filtro de causas
+    if causas_seleccionadas and len(causas_seleccionadas) > 0:
+        fuegos_filtrado = fuegos_filtrado.filter(
+            pl.col("causa").is_in(causas_seleccionadas)
+        )
+
+    # Generación de los gráficos con los datos filtrados
+    fig_mapa = mapa_incendios_por_provincia(
+        data_df=fuegos,
+        provincias_df=provincias_df,
+        ccaa=ccaa,
+        focus=ccaa_seleccionada,
+    )
+
+    # fig_barras = grafico_barras_comparativas(fuegos_filtrado)
+
+    fig_causas = grafico_causas_por_año(fuegos_filtrado)
+
+    # fig_distribucion = grafico_ditribucion_superficie_incendios(
+    #     fuegos_filtrado, polar=True
+    # )
+
+    # Cálculo de los KPIs actualizados
+    total_incendios = f"{len(fuegos_filtrado)}"
+    area_quemada = superficie_formateada(fuegos_filtrado)
+
+    if len(fuegos_filtrado) > 0:
+        año_pico = (
+            fuegos_filtrado.group_by("año")
+            .agg(pl.col("superficie").sum())
+            .sort("superficie", descending=True)
+            .item(0, "año")
+        )
+    else:
+        año_pico = "N/A"
+
+    tendencia = tendencia_incendios(fuegos_filtrado)
+
+    return (
+        fig_mapa,
+        # fig_barras,
+        fig_causas,
+        # fig_distribucion,
+        total_incendios,
+        area_quemada,
+        f"{año_pico}",
+        f"{tendencia}",
+    )
+
 
 if __name__ == "__main__":
     app.run(debug=True)
