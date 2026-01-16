@@ -22,7 +22,7 @@ def mapa_incendios_por_provincia(
         o ccaa, se produce ValueError (índice vacío).
         - Usa escala de color en hectáreas; marcas de fuego usan la columna lng/lat.
         - No modifica los DataFrames de entrada.
-    
+
     :param data_df: DataFrame con los datos de incendios
     :type data_df: pl.DataFrame
     :param provincias_df: GeoDataFrame con las características geográficas de las provincias
@@ -146,7 +146,7 @@ def mapa_incendios_por_provincia(
             y=0.45,
             xanchor="left",
             x=0,
-            orientation="v", # Orientación de la leyenda
+            orientation="v",  # Orientación de la leyenda
             bgcolor="rgba(0,0,0,0.3)",  # Fondo de la leyenda
         ),
         geo_bgcolor="rgba(0,0,0,0)",
@@ -163,11 +163,11 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
     de las causas de incendios a lo largo de los años.
 
     Comportamiento:
-        - Agrupa por ('año','causa'), cuenta incendios y calcula el porcentaje relativo al total anual 
+        - Agrupa por ('año','causa'), cuenta incendios y calcula el porcentaje relativo al total anual
             (suma por año = 100% salvo datos faltantes).
         - Ordena las causas por su media porcentual y asigna colores cíclicamente desde la paleta interna.
         - Añade etiquetas junto al último año.
-    
+
     :param fuegos_df: DataFrame que contiene los datos de incendios
     :type fuegos_df: pl.DataFrame
     :return: Figura de Plotly con el gráfico de áreas apiladas
@@ -300,7 +300,7 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
         por año para cada comunidad.
       - Ordena por media anual de superficie y devuelve las 10 primeras.
       - Añade línea vertical con la media nacional (ha/año) y anotaciones.
-    
+
     :param fuegos_df: DataFrame que contiene los datos de incendios
     :type fuegos_df: pl.DataFrame
     :return: Figura de Plotly con el gráfico de barras
@@ -389,9 +389,7 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
             align="right",
         )
 
-    for i, (xi, mc, pct) in enumerate(
-        zip(x_superficie, media_cantidad, pct_nacional)
-    ):
+    for i, (xi, mc, pct) in enumerate(zip(x_superficie, media_cantidad, pct_nacional)):
         fig.add_annotation(
             x=xi + 5e3,
             y=i,
