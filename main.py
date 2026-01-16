@@ -468,7 +468,7 @@ app.layout = dbc.Container(
 @app.callback(
     [
         Output("graph-mapa", "figure"),
-        # Output("graph-barras", "figure"),
+        Output("graph-barras", "figure"),
         Output("graph-causas", "figure"),
         # Output("graph-distribucion", "figure"),
         Output("kpi-total", "children"),
@@ -515,7 +515,7 @@ def actualizar_dashboard(n_clicks, rango_años, ccaa_seleccionada, causas_selecc
         focus=ccaa_seleccionada,
     )
 
-    # fig_barras = grafico_barras_comparativas(fuegos_filtrado)
+    fig_barras = grafico_barras_comparativas(fuegos_filtrado)
 
     fig_causas = grafico_causas_por_año(fuegos_filtrado)
 
@@ -541,7 +541,7 @@ def actualizar_dashboard(n_clicks, rango_años, ccaa_seleccionada, causas_selecc
 
     return (
         fig_mapa,
-        # fig_barras,
+        fig_barras,
         fig_causas,
         # fig_distribucion,
         total_incendios,

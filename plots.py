@@ -410,14 +410,16 @@ def _grafico_barras_un_año(
 
 def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
     """
-    Genera un gráfico de barras horizontales comparando las 10 comunidades
-    autónomas con mayor superficie quemada anual promedio.
+    Genera un gráfico de barras horizontales comparando regiones por superficie quemada.
 
-    Comportamiento:
-      - Calcula número de años únicos (n_years) y promedia la superficie y cantidad
-        por año para cada comunidad.
-      - Ordena por media anual de superficie y devuelve las 10 primeras.
-      - Añade línea vertical con la media nacional (ha/año) y anotaciones.
+    Comportamiento adaptativo:
+      - Si hay múltiples comunidades: muestra top 10 de comunidades autónomas
+      - Si hay una sola comunidad: muestra todas las provincias de esa comunidad
+
+    Calcula:
+      - Número de años únicos y promedia la superficie y cantidad por año
+      - Ordena por media anual de superficie
+      - Añade línea vertical con la media y anotaciones
 
     :param fuegos_df: DataFrame que contiene los datos de incendios
     :type fuegos_df: pl.DataFrame
@@ -425,6 +427,27 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
     :rtype: go.Figure
     """
     n_years = fuegos_df.select(pl.col("año").n_unique().alias("n")).get_column("n")[0]
+    
+    if fuegos_df.get_column("comunidad").n_unique() == 1:
+        # Modo provincia: se muestran las provincias de la comunidad seleccionada
+        comunidad_nombre = fuegos_df.get_column("comunidad").unique()[0]
+        return _grafico_provincias(fuegos_df, n_years, comunidad_nombre)
+    else:
+        # Modo comunidad: se muestra el top 10 de comunidades
+        return _grafico_comunidades(fuegos_df, n_years)
+
+
+def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
+    """
+    Genera gráfico de comunidades autónomas comparando superficie quemada.
+    
+    :param fuegos_df: DataFrame que contiene los datos de incendios
+    :type fuegos_df: pl.DataFrame
+    :param n_years: Número de años únicos en el conjunto de datos
+    :type n_years: int
+    :return: Figura de Plotly con el gráfico de barras
+    :rtype: go.Figure
+    """
     agg = fuegos_df.group_by("comunidad").agg(
         [
             pl.len().alias("cantidad"),
@@ -448,7 +471,7 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
         .head(10)
     )
 
-    comunidades = agg.get_column("comunidad").to_list()
+    regiones = agg.get_column("comunidad").to_list()
     x_superficie = agg.get_column("media_anual_superficie").to_list()
     media_cantidad = agg.get_column("media_anual_cantidad").to_list()
     pct_nacional = agg.get_column("pct_sobre_nacional").to_list()
@@ -461,13 +484,11 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
     fig.add_trace(
         go.Bar(
             x=x_superficie,
-            y=list(range(len(comunidades))),
+            y=list(range(len(regiones))),
             orientation="h",
             marker=dict(
                 color=x_superficie,
                 colorscale="Hot_r",
-                # showscale=True,
-                # colorbar=dict(title="Ha/año"),
             ),
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
@@ -478,7 +499,7 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
             ),
             customdata=list(
                 zip(
-                    comunidades,
+                    regiones,
                     media_cantidad,
                     superficie_tot,
                     cantidad_tot,
@@ -489,17 +510,17 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
     ).add_vline(
         x=media_nacional,
         line=dict(color="white", dash="dash"),
-        annotation_text=f"Media nacional: {media_nacional:.1f} ha/año",
+        annotation_text=f"Media del top 10: {media_nacional:.1f} ha/año",
         annotation_position="bottom left",
         annotation_font=dict(color="white", size=10),
     )
 
-    for i, comunidad in enumerate(comunidades):
+    for i, region in enumerate(regiones):
         fig.add_annotation(
             xref="paper",
             x=1.02,
             y=i,
-            text=comunidad,
+            text=region,
             showarrow=False,
             xanchor="left",
             xshift=-10,
@@ -514,7 +535,6 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
             text=f"{mc:.1f} / {pct:.1f}%",
             showarrow=False,
             xanchor="left",
-            # xshift=6,
             font=dict(size=8, color="white"),
             valign="middle",
         )
@@ -527,8 +547,131 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="white"),
-        # autosize=True,
-        # height=900,
+        height=None,
+        autosize=True,
+    )
+
+    return fig
+
+
+def _grafico_provincias(fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre: str) -> go.Figure:
+    """
+    Genera gráfico de provincias dentro de una comunidad comparando superficie quemada.
+    
+    :param fuegos_df: DataFrame que contiene los datos de incendios
+    :type fuegos_df: pl.DataFrame
+    :param n_years: Número de años únicos en el conjunto de datos
+    :type n_years: int
+    :param comunidad_nombre: Nombre de la comunidad autónoma
+    :type comunidad_nombre: str
+    :return: Figura de Plotly con el gráfico de barras
+    :rtype: go.Figure
+    """
+    agg = fuegos_df.group_by("provincia").agg(
+        [
+            pl.len().alias("cantidad"),
+            pl.col("superficie").sum().alias("superficie_total"),
+        ]
+    )
+
+    total_superficie_comunidad = agg.select(
+        pl.col("superficie_total").sum().alias("total")
+    ).get_column("total")[0]
+
+    agg = (
+        agg.with_columns(
+            (pl.col("cantidad") / n_years).alias("media_anual_cantidad"),
+            (pl.col("superficie_total") / n_years).alias("media_anual_superficie"),
+            (pl.col("superficie_total") / total_superficie_comunidad * 100).alias(
+                "pct_sobre_comunidad"
+            ),
+        )
+        .sort("media_anual_superficie", descending=True)
+    )
+
+    provincias = agg.get_column("provincia").to_list()
+    x_superficie = agg.get_column("media_anual_superficie").to_list()
+    media_cantidad = agg.get_column("media_anual_cantidad").to_list()
+    pct_comunidad = agg.get_column("pct_sobre_comunidad").to_list()
+    superficie_tot = agg.get_column("superficie_total").to_list()
+    cantidad_tot = agg.get_column("cantidad").to_list()
+    media_comunidad = sum(x_superficie) / len(x_superficie)
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=x_superficie,
+            y=list(range(len(provincias))),
+            orientation="h",
+            marker=dict(
+                color=x_superficie,
+                colorscale="Hot_r",
+            ),
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Media anual de superficie quemada: %{x:.1f} ha<br>"
+                "Media anual de cantidad de incendios: %{customdata[1]:.2f} incendios/año<br>"
+                "Total del periodo: %{customdata[2]:.0f} ha en %{customdata[3]:.0f} incendios<br>"
+                f"Porcentaje sobre superficie de {comunidad_nombre}: %{{customdata[4]:.2f}}%<extra></extra>"
+            ),
+            customdata=list(
+                zip(
+                    provincias,
+                    media_cantidad,
+                    superficie_tot,
+                    cantidad_tot,
+                    pct_comunidad,
+                )
+            ),
+        )
+    )
+    
+    if len(provincias) > 1:
+        fig.add_vline(
+            x=media_comunidad,
+            line=dict(color="white", dash="dash"),
+            annotation_text=f"Media de {comunidad_nombre}: {media_comunidad:.1f} ha/año",
+            annotation_position="bottom left",
+            annotation_font=dict(color="white", size=10),
+        )
+
+    for i, provincia in enumerate(provincias):
+        fig.add_annotation(
+            xref="paper",
+            x=1.02,
+            y=i,
+            text=provincia,
+            showarrow=False,
+            xanchor="left",
+            xshift=-10,
+            font=dict(size=8, color="white"),
+            align="right",
+        )
+
+    for i, (xi, mc, pct) in enumerate(zip(x_superficie, media_cantidad, pct_comunidad)):
+        # Ajustar offset basado en el máximo valor para que las anotaciones no se salgan
+        offset = max(5e3, xi * 0.05)
+        fig.add_annotation(
+            x=xi + offset,
+            y=i,
+            text=f"{mc:.1f} / {pct:.1f}%",
+            showarrow=False,
+            xanchor="left",
+            font=dict(size=8, color="white"),
+            valign="middle",
+        )
+
+    fig.update_layout(
+        xaxis=dict(autorange="reversed"),
+        yaxis=dict(autorange="reversed", showticklabels=False),
+        showlegend=False,
+        margin=dict(l=0, r=100, t=70, b=40),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="white"),
+        height=None,
+        autosize=True,
     )
 
     return fig
