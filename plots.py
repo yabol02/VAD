@@ -195,7 +195,7 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
     """
     Genera un gráfico de áreas apiladas que muestra la evolución porcentual
     de las causas de incendios a lo largo de los años.
-    
+
     Si solo hay un año, muestra un gráfico de barras apiladas horizontales.
 
     Comportamiento:
@@ -233,8 +233,8 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
 
     años_unicos = agg.get_column("año").unique().sort().to_list()
     if len(años_unicos) == 1:
-        return _grafico_barras_un_año(agg, causas_ordenadas, colores, años_unicos[0])
-    
+        return _grafico_causas_un_año(agg, causas_ordenadas, colores, años_unicos[0])
+
     ultimo_año = agg.get_column("año").max()
     etiquetas_data = []
 
@@ -329,7 +329,7 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
     return fig
 
 
-def _grafico_barras_un_año(
+def _grafico_causas_un_año(
     agg: pl.DataFrame, causas_ordenadas: list, colores: list, año: int
 ) -> go.Figure:
     """
@@ -413,8 +413,8 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
     Genera un gráfico de barras horizontales comparando regiones por superficie quemada.
 
     Comportamiento adaptativo:
-      - Si hay múltiples comunidades: muestra top 10 de comunidades autónomas
-      - Si hay una sola comunidad: muestra todas las provincias de esa comunidad
+      - Si hay múltiples comunidades: se muestra un top 10 de comunidades autónomas
+      - Si hay una sola comunidad: se muestran todas las provincias de esa comunidad
 
     Calcula:
       - Número de años únicos y promedia la superficie y cantidad por año
@@ -426,24 +426,60 @@ def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
     :return: Figura de Plotly con el gráfico de barras
     :rtype: go.Figure
     """
+    if fuegos_df.height == 0:
+        return _grafico_vacio("No hay datos para mostrar")
+
     n_years = fuegos_df.select(pl.col("año").n_unique().alias("n")).get_column("n")[0]
-    
+
     if fuegos_df.get_column("comunidad").n_unique() == 1:
-        # Modo provincia: se muestran las provincias de la comunidad seleccionada
+        # Se muestran las provincias de la comunidad seleccionada
         comunidad_nombre = fuegos_df.get_column("comunidad").unique()[0]
         return _grafico_provincias(fuegos_df, n_years, comunidad_nombre)
     else:
-        # Modo comunidad: se muestra el top 10 de comunidades
+        # Se muestra el top 10 de comunidades más afectadas
         return _grafico_comunidades(fuegos_df, n_years)
+
+
+def _grafico_vacio(mensaje: str) -> go.Figure:
+    """
+    Genera un gráfico vacío con un mensaje centrado.
+
+    :param mensaje: Mensaje a mostrar en el gráfico vacío
+    :type mensaje: str
+    :return: Figura de Plotly con el mensaje centrado
+    :rtype: go.Figure
+    """
+    fig = go.Figure()
+
+    fig.add_annotation(
+        text=mensaje,
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=14, color="white"),
+    )
+
+    fig.update_layout(
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=400,
+    )
+
+    return fig
 
 
 def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
     """
-    Genera gráfico de comunidades autónomas comparando superficie quemada.
-    
+    Genera gráfico de barras para el top 10 de comunidades autónomas.
+
     :param fuegos_df: DataFrame que contiene los datos de incendios
     :type fuegos_df: pl.DataFrame
-    :param n_years: Número de años únicos en el conjunto de datos
+    :param n_years: Número de años únicos en el DataFrame
     :type n_years: int
     :return: Figura de Plotly con el gráfico de barras
     :rtype: go.Figure
@@ -454,6 +490,9 @@ def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
             pl.col("superficie").sum().alias("superficie_total"),
         ]
     )
+
+    if agg.height == 0:
+        return _grafico_vacio("No hay datos para mostrar")
 
     total_superficie_nacional = agg.select(
         pl.col("superficie_total").sum().alias("total")
@@ -477,7 +516,10 @@ def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
     pct_nacional = agg.get_column("pct_sobre_nacional").to_list()
     superficie_tot = agg.get_column("superficie_total").to_list()
     cantidad_tot = agg.get_column("cantidad").to_list()
-    media_nacional = sum(x_superficie) / len(x_superficie)
+
+    media_nacional = (
+        sum(x_superficie) / len(x_superficie) if len(x_superficie) > 0 else 0
+    )
 
     fig = go.Figure()
 
@@ -507,13 +549,16 @@ def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
                 )
             ),
         )
-    ).add_vline(
-        x=media_nacional,
-        line=dict(color="white", dash="dash"),
-        annotation_text=f"Media del top 10: {media_nacional:.1f} ha/año",
-        annotation_position="bottom left",
-        annotation_font=dict(color="white", size=10),
     )
+
+    if len(x_superficie) > 1 and media_nacional > 0:
+        fig.add_vline(
+            x=media_nacional,
+            line=dict(color="white", dash="dash"),
+            annotation_text=f"Media del top 10: {media_nacional:.1f} ha/año",
+            annotation_position="bottom left",
+            annotation_font=dict(color="white", size=10),
+        )
 
     for i, region in enumerate(regiones):
         fig.add_annotation(
@@ -530,12 +575,12 @@ def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
 
     for i, (xi, mc, pct) in enumerate(zip(x_superficie, media_cantidad, pct_nacional)):
         fig.add_annotation(
-            x=xi + 5e3,
+            x=max(100, xi * 1.2),
             y=i,
             text=f"{mc:.1f} / {pct:.1f}%",
             showarrow=False,
             xanchor="left",
-            font=dict(size=8, color="white"),
+            font=dict(size=8, color="#AAAAAA"),
             valign="middle",
         )
 
@@ -551,16 +596,20 @@ def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
         autosize=True,
     )
 
+    fig.update_xaxes(range=[0, max(x_superficie)])
+
     return fig
 
 
-def _grafico_provincias(fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre: str) -> go.Figure:
+def _grafico_provincias(
+    fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre: str
+) -> go.Figure:
     """
-    Genera gráfico de provincias dentro de una comunidad comparando superficie quemada.
-    
+    Genera gráfico de barras para las provincias de una comunidad autónoma.
+
     :param fuegos_df: DataFrame que contiene los datos de incendios
     :type fuegos_df: pl.DataFrame
-    :param n_years: Número de años únicos en el conjunto de datos
+    :param n_years: Número de años únicos en el DataFrame
     :type n_years: int
     :param comunidad_nombre: Nombre de la comunidad autónoma
     :type comunidad_nombre: str
@@ -574,20 +623,20 @@ def _grafico_provincias(fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre:
         ]
     )
 
+    if agg.height == 0:
+        return _grafico_vacio(f"No hay datos para {comunidad_nombre}")
+
     total_superficie_comunidad = agg.select(
         pl.col("superficie_total").sum().alias("total")
     ).get_column("total")[0]
 
-    agg = (
-        agg.with_columns(
-            (pl.col("cantidad") / n_years).alias("media_anual_cantidad"),
-            (pl.col("superficie_total") / n_years).alias("media_anual_superficie"),
-            (pl.col("superficie_total") / total_superficie_comunidad * 100).alias(
-                "pct_sobre_comunidad"
-            ),
-        )
-        .sort("media_anual_superficie", descending=True)
-    )
+    agg = agg.with_columns(
+        (pl.col("cantidad") / n_years).alias("media_anual_cantidad"),
+        (pl.col("superficie_total") / n_years).alias("media_anual_superficie"),
+        (pl.col("superficie_total") / total_superficie_comunidad * 100).alias(
+            "pct_sobre_comunidad"
+        ),
+    ).sort("media_anual_superficie", descending=True)
 
     provincias = agg.get_column("provincia").to_list()
     x_superficie = agg.get_column("media_anual_superficie").to_list()
@@ -595,7 +644,10 @@ def _grafico_provincias(fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre:
     pct_comunidad = agg.get_column("pct_sobre_comunidad").to_list()
     superficie_tot = agg.get_column("superficie_total").to_list()
     cantidad_tot = agg.get_column("cantidad").to_list()
-    media_comunidad = sum(x_superficie) / len(x_superficie)
+
+    media_comunidad = (
+        sum(x_superficie) / len(x_superficie) if len(x_superficie) > 0 else 0
+    )
 
     fig = go.Figure()
 
@@ -626,8 +678,8 @@ def _grafico_provincias(fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre:
             ),
         )
     )
-    
-    if len(provincias) > 1:
+
+    if len(provincias) > 1 and media_comunidad > 0:
         fig.add_vline(
             x=media_comunidad,
             line=dict(color="white", dash="dash"),
@@ -650,15 +702,13 @@ def _grafico_provincias(fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre:
         )
 
     for i, (xi, mc, pct) in enumerate(zip(x_superficie, media_cantidad, pct_comunidad)):
-        # Ajustar offset basado en el máximo valor para que las anotaciones no se salgan
-        offset = max(5e3, xi * 0.05)
         fig.add_annotation(
-            x=xi + offset,
+            x=max(100, xi * 1.2),
             y=i,
             text=f"{mc:.1f} / {pct:.1f}%",
             showarrow=False,
             xanchor="left",
-            font=dict(size=8, color="white"),
+            font=dict(size=8, color="#AAAAAA"),
             valign="middle",
         )
 
@@ -673,6 +723,8 @@ def _grafico_provincias(fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre:
         height=None,
         autosize=True,
     )
+
+    fig.update_xaxes(range=[0, max(x_superficie)])
 
     return fig
 
@@ -697,7 +749,7 @@ def grafico_ditribucion_superficie_incendios(
     :param polar: Indica si el gráfico debe ser en formato polar o cartesiano
     :type polar: bool
     :return: Figura generada
-    :rtype: Figure
+    :rtype: go.Figure
     """
     x_grid = np.linspace(0, 1000, 500)
     agg = (
