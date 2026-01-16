@@ -461,6 +461,7 @@ def grafico_ditribucion_superficie_incendios(
         - Para calcular la densidad, solo se consideran incendios con superficie > 20 ha.
         - Se calcula la KDE para cada semana y se multiplica por la media de superficie de esa semana.
         - Se interpola la densidad entre semanas para suavizar la visualización.
+        - Se aplica la raíz cuadrada a la matriz de densidades para mejorar la visibilidad de las áreas con baja densidad.
 
     Permite visualizarse en formato cartesiano o polar.
 
@@ -472,43 +473,44 @@ def grafico_ditribucion_superficie_incendios(
     :rtype: Figure
     """
     x_grid = np.linspace(0, 1000, 500)
-    grupos = (
+    agg = (
         fuegos_df.filter(pl.col("superficie") > 20)
         .group_by("semana")
         .agg(pl.col("superficie"))
         .sort("semana")
     )
 
-    semanas = grupos["semana"].to_numpy()
+    semanas = agg["semana"].to_numpy()
     n_semanas = len(semanas)
 
     kde_matrix = np.zeros((2 * n_semanas, len(x_grid)))
     stats_list = np.empty((2 * n_semanas, 2))
 
-    for i, vals in enumerate(grupos["superficie"]):
+    for i, vals in enumerate(agg["superficie"]):
         data = np.asanyarray(vals)
-        media = np.mean(data)
+        media = np.mean(data) if data.size > 0 else data.item()
         stats_list[i * 2, 0] = media
-        stats_list[i * 2, 1] = np.median(data)
+        stats_list[i * 2, 1] = np.median(data) if data.size > 0 else data.item()
         kde = gaussian_kde(data)
         kde_matrix[i * 2, :] = kde(x_grid) * media
 
     kde_matrix[1::2, :] = (
         kde_matrix[0::2, :] + np.vstack([kde_matrix[2::2, :], kde_matrix[0:1, :]])
     ) / 2
-    # Estilo compartido (usado por ambos modos)
+    np.sqrt(kde_matrix, out=kde_matrix)
+
     base_layout = dict(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="white"),
         margin=dict(t=30, b=30, l=40, r=30),
+        autosize=True,
     )
 
     if not polar:
-        z = np.sqrt(kde_matrix)
         fig = go.Figure(
             data=go.Heatmap(
-                z=z,
+                z=kde_matrix,
                 x=x_grid,
                 y=semanas,
                 colorscale="Hot",
@@ -541,18 +543,21 @@ def grafico_ditribucion_superficie_incendios(
         thetas = []
         radius = []
         intensities = []
+        hover = []
 
         for i, theta in enumerate(angles):
+            sem_actual = semanas[i // 2] if i // 2 < len(semanas) else semanas[-1]
             for j, superficie in enumerate(x_grid):
                 thetas.append(theta)
                 radius.append(superficie)
                 intensities.append(kde_matrix[i, j])
+                hover.append(sem_actual)
 
         MAX_MARKER_SIZE = 8
         MIN_MARKER_SIZE = 0.1
         r_array = np.array(radius)
         r_min, r_max = r_array.min(), r_array.max()
-        sizes = (r_array - r_min) / (r_max - r_min + 1e-9) * (
+        sizes = ((r_array - r_min) / (r_max - r_min + 1e-9)) ** 2 * (
             MAX_MARKER_SIZE - MIN_MARKER_SIZE
         ) + MIN_MARKER_SIZE
 
@@ -565,30 +570,41 @@ def grafico_ditribucion_superficie_incendios(
                     size=sizes,
                     color=intensities,
                     colorscale="Hot",
-                    colorbar=dict(
-                        title="Densidad KDE",
-                        title_font=dict(color="white"),
-                        tickfont=dict(color="white"),
-                        thickness=20,
-                    ),
                     line_width=0,
-                    opacity=0.9,
+                    opacity=0.8,
+                ),
+                customdata=hover,
+                hovertemplate=(
+                    "<b>Semana:</b> %{customdata}<br>"
+                    + "<b>Superficie:</b> %{r:.0f} ha<br>"
+                    + "<b>Densidad:</b> %{color:.4f}<extra></extra>"
                 ),
             )
         )
-
+        meses_angles = np.linspace(0, 360, 12, endpoint=False)
         fig.update_layout(**base_layout)
         fig.update_layout(
+            showlegend=False,
             polar=dict(
                 bgcolor="rgba(0,0,0,0)",
+                angularaxis=dict(
+                    tickmode="array",
+                    tickvals=meses_angles,
+                    ticktext=MESES,
+                    direction="clockwise",
+                    rotation=90,  # Enero arriba
+                    gridcolor="rgba(255,255,255,0.1)",
+                    tickfont=dict(size=12, color="white"),
+                ),
                 radialaxis=dict(
                     title="Superficie (ha)",
-                    title_font=dict(color="white"),
-                    tickfont=dict(color="white"),
+                    title_font=dict(size=10),
+                    tickfont=dict(size=9, color="rgba(255,255,255,0.6)"),
                     gridcolor="rgba(255,255,255,0.05)",
+                    angle=45,  # Inclina las etiquetas para que no se pisen con el eje N
+                    showline=False,
                 ),
-                angularaxis=dict(tickfont=dict(color="white")),
-            )
+            ),
         )
 
     return fig
