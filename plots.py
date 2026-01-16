@@ -6,6 +6,8 @@ import plotly.graph_objects as go
 import polars as pl
 from scipy.stats import gaussian_kde
 
+from utils import CAUSA_EMOJI, MESES
+
 
 def mapa_incendios_por_provincia(
     data_df: pl.DataFrame,
@@ -108,7 +110,7 @@ def mapa_incendios_por_provincia(
             lon=grandes_incendios["lng"],
             lat=grandes_incendios["lat"],
             mode="text",
-            text="🔥",
+            text=[CAUSA_EMOJI[causa] for causa in grandes_incendios["causa"].to_list()],
             textposition="middle center",
             textfont=dict(size=grandes_incendios["marker_size"]),
             marker=dict(
@@ -118,6 +120,36 @@ def mapa_incendios_por_provincia(
             hovertext=grandes_incendios["hover_text"],
             showlegend=False,
         )
+        fig.add_annotation(
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.85,
+            text=(
+                f'<span style="color: white; font-weight: bold; '
+                f'text-shadow: 1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black;">'
+                f"Grandes incendios en «{focus}» (≥ 500 ha)</span>"
+            ),
+            showarrow=False,
+            font=dict(size=14, family="sans-serif", color="white"),
+        )
+        leyenda_causas = "<br>".join(
+            f"{emoji} {causa}" for causa, emoji in CAUSA_EMOJI.items()
+        )
+        fig.add_annotation(
+            xref="paper",
+            yref="paper",
+            x=1.0,
+            y=0.8,
+            align="left",
+            text=("<b>Causa del incendio</b><br><br>" f"{leyenda_causas}"),
+            showarrow=False,
+            font=dict(size=12, color="white"),
+            bgcolor="rgba(0, 0, 0, 0.6)",
+            bordercolor="white",
+            borderwidth=1,
+        )
+
     else:
         fig.update_geos(
             center={"lat": 40.4167, "lon": -3.7033},
