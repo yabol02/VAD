@@ -195,16 +195,18 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
     """
     Genera un gráfico de áreas apiladas que muestra la evolución porcentual
     de las causas de incendios a lo largo de los años.
+    
+    Si solo hay un año, muestra un gráfico de barras apiladas horizontales.
 
     Comportamiento:
         - Agrupa por ('año','causa'), cuenta incendios y calcula el porcentaje relativo al total anual
             (suma por año = 100% salvo datos faltantes).
         - Ordena las causas por su media porcentual y asigna colores cíclicamente desde la paleta interna.
-        - Añade etiquetas junto al último año.
+        - Añade etiquetas junto al último año (o dentro de las barras si es un solo año).
 
     :param fuegos_df: DataFrame que contiene los datos de incendios
     :type fuegos_df: pl.DataFrame
-    :return: Figura de Plotly con el gráfico de áreas apiladas
+    :return: Figura de Plotly con el gráfico de áreas apiladas o barras
     :rtype: go.Figure
     """
     agg = (
@@ -228,6 +230,11 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
     )
 
     colores = ["#8B0000", "#FF4500", "#FF8C00", "#FFD700", "#FFFACD", "#708090"]
+
+    años_unicos = agg.get_column("año").unique().sort().to_list()
+    if len(años_unicos) == 1:
+        return _grafico_barras_un_año(agg, causas_ordenadas, colores, años_unicos[0])
+    
     ultimo_año = agg.get_column("año").max()
     etiquetas_data = []
 
@@ -293,12 +300,11 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
             yanchor="top",
         ),
         xaxis=dict(
-            # title="Año",
             type="category",
             showgrid=False,
             tickmode="array",
             ticks="outside",
-            tickvals=[a for a in agg.get_column("año").unique().sort().to_list()][::3],
+            tickvals=[a for a in años_unicos][::3],
             title_font=dict(size=10, color="white"),
             tickfont=dict(color="white"),
             ticklen=5,
@@ -306,7 +312,6 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
             tickwidth=1,
         ),
         yaxis=dict(
-            # title="Porcentaje de incendios",
             range=[0, 100],
             ticksuffix="%",
             title_font=dict(size=14, color="white"),
@@ -316,9 +321,88 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
         ),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(
-            t=40,
+        margin=dict(t=40),
+        height=None,
+        autosize=True,
+    )
+
+    return fig
+
+
+def _grafico_barras_un_año(
+    agg: pl.DataFrame, causas_ordenadas: list, colores: list, año: int
+) -> go.Figure:
+    """
+    Crea un gráfico de barras horizontales apiladas para un solo año.
+
+    Únicamente se utiliza cuando el DataFrame contiene datos de un solo año para
+    representar la distribución porcentual de las causas de incendios.
+
+    :param agg: DataFrame agregado con datos de incendios
+    :type agg: pl.DataFrame
+    :param causas_ordenadas: Lista de causas ordenadas por frecuencia
+    :type causas_ordenadas: list
+    :param colores: Lista de colores para las causas
+    :type colores: list
+    :param año: El año único presente en los datos
+    :type año: int
+    :return: Figura de Plotly con barras horizontales apiladas
+    :rtype: go.Figure
+    """
+    fig = go.Figure()
+
+    posicion_acumulada = 0
+
+    for i, causa in enumerate(causas_ordenadas):
+        df_causa = agg.filter(pl.col("causa") == causa)
+
+        if df_causa.height == 0:
+            continue
+
+        porcentaje = df_causa.get_column("porcentaje").item()
+        num_incendios = df_causa.get_column("num_incendios").item()
+        color_causa = colores[i % len(colores)]
+
+        fig.add_trace(
+            go.Bar(
+                x=[porcentaje],
+                y=[str(año)],
+                orientation="h",
+                name=str(causa),
+                marker=dict(
+                    color=color_causa, line=dict(color="rgba(0,0,0,0.3)", width=1)
+                ),
+                hovertemplate=f"<b>{causa}</b><br>{porcentaje:.1f}% ({num_incendios} incendios)<extra></extra>",
+                text=f"{causa}<br>{porcentaje:.1f}%",
+                textposition="inside",
+                textfont=dict(color="white", size=10, family="Arial Black"),
+                insidetextanchor="middle",
+            )
+        )
+
+        posicion_acumulada += porcentaje
+
+    fig.update_layout(
+        barmode="stack",
+        showlegend=False,
+        xaxis=dict(
+            range=[0, 100],
+            ticksuffix="%",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+            title_font=dict(size=12, color="white"),
+            tickfont=dict(color="white", size=10),
         ),
+        yaxis=dict(
+            title="Año",
+            showgrid=False,
+            title_font=dict(size=12, color="white"),
+            tickfont=dict(color="white", size=12),
+        ),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=80, r=40, t=40, b=60),
+        height=200,
     )
 
     return fig

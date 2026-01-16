@@ -82,8 +82,8 @@ PROVINCIAS = {
 
 CAUSAS = {
     1: "Por rayo",
-    2: "Accidente",
-    3: "Negligencia",
+    2: "Negligencia",
+    3: "Accidente",
     4: "Intencionado",
     5: "De origen desconocido",
     6: "Reproducido",
@@ -91,8 +91,8 @@ CAUSAS = {
 
 CAUSA_EMOJI = {
     "Por rayo": " ⚡ ",
-    "Accidente": " 🛠️ ",
     "Negligencia": " 🚬 ",
+    "Accidente": " 🛠️ ",
     "Intencionado": " 🔥 ",
     "De origen desconocido": " ❓ ",
     "Reproducido": " 🔁 ",

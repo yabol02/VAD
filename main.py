@@ -502,6 +502,7 @@ def actualizar_dashboard(n_clicks, rango_años, ccaa_seleccionada, causas_selecc
 
     # Filtro de causas
     if causas_seleccionadas and len(causas_seleccionadas) > 0:
+        causas_seleccionadas = [CAUSAS[causa] for causa in causas_seleccionadas]
         fuegos_filtrado = fuegos_filtrado.filter(
             pl.col("causa").is_in(causas_seleccionadas)
         )
