@@ -729,7 +729,7 @@ def _grafico_provincias(
     return fig
 
 
-def grafico_ditribucion_superficie_incendios(
+def grafico_distribucion_superficie_incendios(
     fuegos_df: pl.DataFrame, polar: bool = False
 ) -> go.Figure:
     """
@@ -751,32 +751,77 @@ def grafico_ditribucion_superficie_incendios(
     :return: Figura generada
     :rtype: go.Figure
     """
-    x_grid = np.linspace(0, 1000, 500)
-    agg = (
-        fuegos_df.filter(pl.col("superficie") > 20)
-        .group_by("semana")
-        .agg(pl.col("superficie"))
-        .sort("semana")
-    )
+    if fuegos_df.height == 0:
+        return _grafico_vacio("No hay datos de incendios disponibles")
+
+    fuegos_df = fuegos_df.filter(pl.col("superficie") > 20)
+
+    if fuegos_df.height == 0:
+        return _grafico_vacio(
+            "No hay incendios con superficie > 20 ha en el periodo seleccionado"
+        )
+
+    # Agregar por semana
+    agg = fuegos_df.group_by("semana").agg(pl.col("superficie")).sort("semana")
+
+    if agg.height == 0:
+        return _grafico_vacio("No hay datos suficientes para generar la distribución")
 
     semanas = agg["semana"].to_numpy()
     n_semanas = len(semanas)
+
+    if n_semanas < 3:
+        return _grafico_vacio(
+            f"Datos insuficientes para KDE: solo hay {n_semanas} semana(s) con incendios > 20 ha"
+        )
+
+    # Superficie para el grid
+    todas_superficies = fuegos_df["superficie"].to_numpy()
+    superficie_max = min(
+        np.percentile(todas_superficies, 99), 1000
+    )
+    superficie_max = max(superficie_max, 100)
+
+    x_grid = np.linspace(0, superficie_max, 500)
 
     kde_matrix = np.zeros((2 * n_semanas, len(x_grid)))
     stats_list = np.empty((2 * n_semanas, 2))
 
     for i, vals in enumerate(agg["superficie"]):
         data = np.asanyarray(vals)
-        media = np.mean(data) if data.size > 0 else data.item()
-        stats_list[i * 2, 0] = media
-        stats_list[i * 2, 1] = np.median(data) if data.size > 0 else data.item()
-        kde = gaussian_kde(data)
-        kde_matrix[i * 2, :] = kde(x_grid) * media
 
+        if data.size == 0:
+            continue
+
+        media = np.mean(data) if data.size > 0 else 0
+        mediana = np.median(data) if data.size > 0 else 0
+
+        stats_list[i * 2, 0] = media
+        stats_list[i * 2, 1] = mediana
+
+        # Se calcula el KDE solo si hay más de un punto
+        if data.size > 1:
+            try:
+                kde = gaussian_kde(data)
+                kde_matrix[i * 2, :] = kde(x_grid) * media
+            except Exception as e:
+                kde_matrix[i * 2, :] = np.zeros_like(x_grid)
+                raise Exception(
+                    f"Error al calcular KDE; se usará distribución uniforme simple\n{e}"
+                )
+        else:
+            # Si existe tan solo un punto se pone un pico en ese valor
+            idx_cercano = np.argmin(np.abs(x_grid - data.item()))
+            kde_matrix[i * 2, idx_cercano] = media
+
+    # Interpolación entre semanas
     kde_matrix[1::2, :] = (
         kde_matrix[0::2, :] + np.vstack([kde_matrix[2::2, :], kde_matrix[0:1, :]])
     ) / 2
-    np.sqrt(kde_matrix, out=kde_matrix)
+
+    # Aplicar transformación de raíz cuadrada solo si hay valores
+    if np.any(kde_matrix > 0):
+        np.sqrt(kde_matrix, out=kde_matrix)
 
     base_layout = dict(
         paper_bgcolor="rgba(0,0,0,0)",
@@ -791,13 +836,18 @@ def grafico_ditribucion_superficie_incendios(
             data=go.Heatmap(
                 z=kde_matrix,
                 x=x_grid,
-                y=semanas,
+                y=np.repeat(semanas, 2),
                 colorscale="Hot",
                 colorbar=dict(
                     title="Densidad KDE",
                     title_font=dict(color="white"),
                     tickfont=dict(color="white"),
                     thickness=20,
+                ),
+                hovertemplate=(
+                    "<b>Semana:</b> %{y:.0f}<br>"
+                    + "<b>Superficie:</b> %{x:.0f} ha<br>"
+                    + "<b>Densidad:</b> %{z:.4f}<extra></extra>"
                 ),
             )
         )
@@ -814,6 +864,7 @@ def grafico_ditribucion_superficie_incendios(
             title_font=dict(color="white"),
             tickfont=dict(color="white"),
             showgrid=False,
+            range=[min(semanas) - 1, max(semanas) + 1],
         )
     else:
         n = kde_matrix.shape[0]
@@ -832,13 +883,18 @@ def grafico_ditribucion_superficie_incendios(
                 intensities.append(kde_matrix[i, j])
                 hover.append(sem_actual)
 
+        # Ajuste dinámico de los tamaños de los marcadores
         MAX_MARKER_SIZE = 8
         MIN_MARKER_SIZE = 0.1
         r_array = np.array(radius)
         r_min, r_max = r_array.min(), r_array.max()
-        sizes = ((r_array - r_min) / (r_max - r_min + 1e-9)) ** 2 * (
-            MAX_MARKER_SIZE - MIN_MARKER_SIZE
-        ) + MIN_MARKER_SIZE
+
+        if r_max > r_min:
+            sizes = ((r_array - r_min) / (r_max - r_min)) ** 2 * (
+                MAX_MARKER_SIZE - MIN_MARKER_SIZE
+            ) + MIN_MARKER_SIZE
+        else:
+            sizes = np.full_like(r_array, (MAX_MARKER_SIZE + MIN_MARKER_SIZE) / 2)
 
         fig = go.Figure(
             go.Scatterpolar(
@@ -856,10 +912,11 @@ def grafico_ditribucion_superficie_incendios(
                 hovertemplate=(
                     "<b>Semana:</b> %{customdata}<br>"
                     + "<b>Superficie:</b> %{r:.0f} ha<br>"
-                    + "<b>Densidad:</b> %{color:.4f}<extra></extra>"
+                    + "<b>Densidad:</b> %{marker.color:.4f}<extra></extra>"
                 ),
             )
         )
+
         meses_angles = np.linspace(0, 360, 12, endpoint=False)
         fig.update_layout(**base_layout)
         fig.update_layout(
@@ -871,7 +928,7 @@ def grafico_ditribucion_superficie_incendios(
                     tickvals=meses_angles,
                     ticktext=MESES,
                     direction="clockwise",
-                    rotation=90,  # Enero arriba
+                    rotation=90,
                     gridcolor="rgba(255,255,255,0.1)",
                     tickfont=dict(size=12, color="white"),
                 ),
@@ -880,8 +937,9 @@ def grafico_ditribucion_superficie_incendios(
                     title_font=dict(size=10),
                     tickfont=dict(size=9, color="rgba(255,255,255,0.6)"),
                     gridcolor="rgba(255,255,255,0.05)",
-                    angle=45,  # Inclina las etiquetas para que no se pisen con el eje N
+                    angle=45,
                     showline=False,
+                    range=[0, superficie_max],
                 ),
             ),
         )

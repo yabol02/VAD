@@ -6,7 +6,7 @@ import polars as pl
 from dash import Input, Output, State, dcc, html
 
 from plots import (grafico_barras_comparativas, grafico_causas_por_año,
-                   grafico_ditribucion_superficie_incendios,
+                   grafico_distribucion_superficie_incendios,
                    mapa_incendios_por_provincia)
 from processing import CAUSAS, COMUNIDADES, ccaa, fuegos, provincias_df
 from utils import CardStyle, superficie_formateada, tendencia_incendios
@@ -299,17 +299,39 @@ app.layout = dbc.Container(
                         dbc.Card(
                             [
                                 dbc.CardHeader(
-                                    "Distribución de la superficie afectada por incendios mes a mes",
-                                    style={
-                                        "textAlign": "center",
-                                        "fontWeight": "600",
-                                        "fontSize": "1.4rem",
-                                    },
+                                    [
+                                        html.Div(
+                                            [
+                                                html.Span(
+                                                    "Distribución de la superficie afectada por incendios mes a mes",
+                                                    style={
+                                                        "fontWeight": "600",
+                                                        "fontSize": "1.4rem",
+                                                    },
+                                                ),
+                                                dbc.Switch(
+                                                    id="toggle-polar-distribucion",
+                                                    label="Vista Polar",
+                                                    value=True,
+                                                    className="mt-2",
+                                                    style={
+                                                        "fontSize": "0.9rem",
+                                                    },
+                                                ),
+                                            ],
+                                            style={
+                                                "textAlign": "center",
+                                                "display": "flex",
+                                                "flexDirection": "column",
+                                                "alignItems": "center",
+                                            },
+                                        ),
+                                    ],
                                 ),
                                 dbc.CardBody(
                                     dcc.Graph(
                                         id="graph-distribucion",
-                                        figure=grafico_ditribucion_superficie_incendios(
+                                        figure=grafico_distribucion_superficie_incendios(
                                             fuegos, polar=True
                                         ),
                                         config={"displayModeBar": False},
@@ -470,13 +492,13 @@ app.layout = dbc.Container(
         Output("graph-mapa", "figure"),
         Output("graph-barras", "figure"),
         Output("graph-causas", "figure"),
-        # Output("graph-distribucion", "figure"),
+        Output("graph-distribucion", "figure"),
         Output("kpi-total", "children"),
         Output("kpi-area", "children"),
         Output("kpi-año-pico", "children"),
         Output("kpi-tendencia", "children"),
     ],
-    [Input("btn-filtrar", "n_clicks")],
+    [Input("btn-filtrar", "n_clicks"), Input("toggle-polar-distribucion", "value")],
     [
         State("slider-años", "value"),
         State("dropdown-ccaa", "value"),
@@ -484,7 +506,9 @@ app.layout = dbc.Container(
     ],
     prevent_initial_call=False,
 )
-def actualizar_dashboard(n_clicks, rango_años, ccaa_seleccionada, causas_seleccionadas):
+def actualizar_dashboard(
+    n_clicks, polar, rango_años, ccaa_seleccionada, causas_seleccionadas
+):
     # Crear copia del dataframe original
     fuegos_filtrado = fuegos
 
@@ -497,7 +521,7 @@ def actualizar_dashboard(n_clicks, rango_años, ccaa_seleccionada, causas_selecc
     # Filtro de comunidad autónoma
     if ccaa_seleccionada:
         fuegos_filtrado = fuegos_filtrado.filter(
-            pl.col("comunidad")==ccaa_seleccionada
+            pl.col("comunidad") == ccaa_seleccionada
         )
 
     # Filtro de causas
@@ -519,9 +543,9 @@ def actualizar_dashboard(n_clicks, rango_años, ccaa_seleccionada, causas_selecc
 
     fig_causas = grafico_causas_por_año(fuegos_filtrado)
 
-    # fig_distribucion = grafico_ditribucion_superficie_incendios(
-    #     fuegos_filtrado, polar=True
-    # )
+    fig_distribucion = grafico_distribucion_superficie_incendios(
+        fuegos_filtrado, polar=polar
+    )
 
     # Cálculo de los KPIs actualizados
     total_incendios = f"{len(fuegos_filtrado)}"
@@ -543,7 +567,7 @@ def actualizar_dashboard(n_clicks, rango_años, ccaa_seleccionada, causas_selecc
         fig_mapa,
         fig_barras,
         fig_causas,
-        # fig_distribucion,
+        fig_distribucion,
         total_incendios,
         area_quemada,
         f"{año_pico}",
