@@ -1,490 +1,472 @@
+"""Dashboard de análisis de incendios forestales en España."""
+
+from __future__ import annotations
+
+from typing import Optional
+
 import dash
 import dash_bootstrap_components as dbc
-import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import polars as pl
 from dash import Input, Output, State, dcc, html
 
 from plots import (grafico_barras_comparativas, grafico_causas_por_año,
                    grafico_distribucion_superficie_incendios,
                    mapa_incendios_por_provincia)
-from processing import CAUSAS, COMUNIDADES, ccaa, fuegos, provincias_df
-from utils import CardStyle, superficie_formateada, tendencia_incendios
+from processing import CAUSAS, ccaa, fuegos, provincias_df
+from utils import superficie_formateada, tendencia_incendios
 
-año_min = fuegos.select(pl.col("año")).min().item()
-año_max = fuegos.select(pl.col("año")).max().item()
-ccaa_options = [
-    {"label": ccaa, "value": ccaa}
-    for ccaa in sorted(provincias_df.CCAA.unique().tolist())
-]
 
-# Gráfico placeholder genérico
-fig_polar = px.line_polar(
-    r=[1, 2, 3, 4, 1],
-    theta=[0, 90, 180, 270, 0],
-    line_close=True,
-    template="simple_white",
-)
+class DashboardConfig:
+    """Configuración centralizada del dashboard."""
 
-# Márgenes en figuras para que quepan bien en las cards
-fig_polar.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=150)
+    # Años de datos
+    AÑO_MIN = fuegos.select("año").min().item()
+    AÑO_MAX = fuegos.select("año").max().item()
 
-app = dash.Dash(
-    __name__,
-    external_stylesheets=[
+    # Opciones de comunidades autónomas
+    CCAA_OPTIONS = sorted(provincias_df.CCAA.unique().tolist())
+
+    # Estilos
+    TITLE_STYLE = {
+        "fontSize": "3.2rem",
+        "fontWeight": "800",
+        "fontFamily": "Montserrat, sans-serif",
+        "color": "#FFFFFF",
+        "marginBottom": "0",
+        "letterSpacing": "1px",
+    }
+
+    SUBTITLE_STYLE = {
+        "color": "#666",
+        "fontWeight": "400",
+        "fontSize": "1.5rem",
+    }
+
+    KPI_TITLE_STYLE = {"fontSize": "1rem", "textAlign": "center"}
+    KPI_VALUE_STYLE = {"fontSize": "1.4rem", "textAlign": "center"}
+    CARD_HEADER_STYLE = {
+        "textAlign": "center",
+        "fontWeight": "600",
+        "fontSize": "1.4rem",
+    }
+
+    # Temas externos
+    EXTERNAL_STYLESHEETS = [
         dbc.themes.CYBORG,
         "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap",
-    ],
-)
+    ]
 
-app.layout = dbc.Container(
-    id="contenedor-principal",
-    children=[
-        # --- FILA 1: Tí­tulo y KPIs ---
-        dbc.Row(
-            children=[
-                dbc.Col(
-                    id="contenedor-titulo",
-                    children=[
-                        html.Div(
-                            id="titulo",
-                            children=[
-                                html.H2(
-                                    f"PANEL DE CONTROL DE INCENDIOS EN ESPAÑA",
-                                    className="display-4",
-                                    style={
-                                        "fontSize": "3.2rem",
-                                        "fontWeight": "800",
-                                        "fontFamily": "Montserrat, sans-serif",
-                                        "color": "#FFFFFF",
-                                        "marginBottom": "0",
-                                        "letterSpacing": "1px",
-                                    },
-                                ),
-                                html.P(
-                                    f"Perí­odo registrado: {año_min}-{año_max}",
-                                    className="lead pt-3",
-                                    style={
-                                        "color": "#666",
-                                        "fontWeight": "400",
-                                        "fontSize": "1.5rem",
-                                    },
-                                ),
-                            ],
-                            className="h-100 d-flex flex-column justify-content-center",
-                        )
-                    ],
-                    xs=12,
-                    lg=6,
-                    className="mt-3 mb-1",
-                ),
-                dbc.Col(
-                    id="contenedor-kpis",
-                    children=[
-                        dbc.Row(
-                            children=[
-                                dbc.Col(
-                                    dbc.Card(
-                                        dbc.CardBody(
-                                            [
-                                                html.H3(
-                                                    "Total incendios",
-                                                    style={
-                                                        "fontSize": "1rem",
-                                                        "textAlign": "center",
-                                                    },
-                                                ),
-                                                html.H2(
-                                                    id="kpi-total",
-                                                    children=f"{len(fuegos)}",
-                                                    style={
-                                                        "fontSize": "1.4rem",
-                                                        "textAlign": "center",
-                                                    },
-                                                ),
-                                            ]
-                                        )
-                                    ),
-                                    width=6,
-                                    md=3,
-                                    className="mb-2",
-                                ),
-                                dbc.Col(
-                                    dbc.Card(
-                                        dbc.CardBody(
-                                            [
-                                                html.H3(
-                                                    "Área quemada",
-                                                    style={
-                                                        "fontSize": "1rem",
-                                                        "textAlign": "center",
-                                                    },
-                                                ),
-                                                html.H2(
-                                                    id="kpi-area",
-                                                    children=superficie_formateada(
-                                                        fuegos
-                                                    ),
-                                                    style={
-                                                        "fontSize": "1.4rem",
-                                                        "textAlign": "center",
-                                                    },
-                                                ),
-                                            ]
-                                        )
-                                    ),
-                                    width=6,
-                                    md=3,
-                                    className="mb-2",
-                                ),
-                                dbc.Col(
-                                    dbc.Card(
-                                        dbc.CardBody(
-                                            [
-                                                html.H3(
-                                                    "Año pico",
-                                                    style={
-                                                        "fontSize": "1rem",
-                                                        "textAlign": "center",
-                                                    },
-                                                ),
-                                                html.H2(
-                                                    id="kpi-año-pico",
-                                                    children=f"{fuegos.group_by("año").agg(pl.col("superficie").sum()).sort("superficie", descending=True).item(0, "año")}",
-                                                    style={
-                                                        "fontSize": "1.4rem",
-                                                        "textAlign": "center",
-                                                    },
-                                                ),
-                                            ]
-                                        )
-                                    ),
-                                    width=6,
-                                    md=3,
-                                    className="mb-2",
-                                ),
-                                dbc.Col(
-                                    dbc.Card(
-                                        dbc.CardBody(
-                                            [
-                                                html.H3(
-                                                    "Tendencia",
-                                                    style={
-                                                        "fontSize": "1rem",
-                                                        "textAlign": "center",
-                                                    },
-                                                ),
-                                                html.H2(
-                                                    id="kpi-tendencia",
-                                                    children=f"{tendencia_incendios(fuegos)}",
-                                                    style={
-                                                        "fontSize": "1.4rem",
-                                                        "textAlign": "center",
-                                                    },
-                                                ),
-                                            ]
-                                        )
-                                    ),
-                                    width=6,
-                                    md=3,
-                                    className="mb-2",
-                                ),
-                            ]
-                        )
-                    ],
-                    xs=12,
-                    lg=6,
-                ),
-            ],
-            className="mb-4 align-items-center",
+
+def create_kpi_card(title: str, value: str, kpi_id: str) -> dbc.Col:
+    """
+    Crea una tarjeta KPI reutilizable.
+
+    :param title: Título del KPI
+    :param value: Valor inicial del KPI
+    :param kpi_id: ID único para el componente
+    :return: Columna de Dash con la tarjeta KPI
+    """
+    return dbc.Col(
+        dbc.Card(
+            dbc.CardBody(
+                [
+                    html.H3(title, style=DashboardConfig.KPI_TITLE_STYLE),
+                    html.H2(
+                        id=kpi_id,
+                        children=value,
+                        style=DashboardConfig.KPI_VALUE_STYLE,
+                    ),
+                ]
+            )
         ),
-        # --- FILA 2: Gráficos principales ---
-        dbc.Row(
-            id="contenedor-graficos-1",
-            children=[
-                dbc.Col(
-                    id="grafico-mapa",
+        width=6,
+        md=3,
+        className="mb-2",
+    )
+
+
+def create_graph_card(
+    card_id: str,
+    header_text: str,
+    graph_id: str,
+    figure: Optional[go.Figure] = None,
+    graph_config: Optional[dict] = None,
+    graph_style: Optional[dict] = None,
+    header_extra: Optional[list] = None,
+) -> dbc.Card:
+    """
+    Crea una tarjeta con gráfico reutilizable.
+
+    :param card_id: ID del contenedor de la tarjeta
+    :param header_text: Texto del encabezado
+    :param graph_id: ID del componente Graph
+    :param figure: Figura de Plotly inicial
+    :param graph_config: Configuración adicional del gráfico
+    :param graph_style: Estilos CSS del gráfico
+    :param header_extra: Componentes adicionales en el header
+    :return: Tarjeta de Dash con el gráfico
+    """
+    header_content = [
+        html.Span(header_text, style={"fontWeight": "600", "fontSize": "1.4rem"})
+    ]
+
+    if header_extra:
+        header_content.extend(header_extra)
+
+    header = dbc.CardHeader(
+        html.Div(
+            header_content,
+            style={
+                "textAlign": "center",
+                "display": "flex",
+                "flexDirection": "column",
+                "alignItems": "center",
+            },
+        )
+        if header_extra
+        else header_content[0]
+    )
+
+    return dbc.Card(
+        [
+            header,
+            dbc.CardBody(
+                dcc.Graph(
+                    id=graph_id,
+                    figure=figure,
+                    config=graph_config or {},
+                    style=graph_style or {},
+                )
+            ),
+        ]
+    )
+
+
+def build_layout() -> dbc.Container:
+    """
+    Construye el layout completo del dashboard.
+
+    :return: Contenedor principal de Dash
+    """
+
+    # KPIs calculados
+    año_pico = (
+        fuegos.group_by("año")
+        .agg(pl.col("superficie").sum())
+        .sort("superficie", descending=True)
+        .item(0, "año")
+    )
+
+    return dbc.Container(
+        id="contenedor-principal",
+        fluid=True,
+        style={"backgroundColor": "#252222"},
+        children=[
+            # Fila 1: Título y KPIs
+            _build_header_and_kpis(año_pico),
+            # Fila 2: Gráficos principales
+            _build_main_charts(),
+            # Fila 3: Gráficos secundarios
+            _build_secondary_charts(),
+            # Fila 4: Controles y créditos
+            _build_controls_and_footer(),
+        ],
+    )
+
+
+def _build_header_and_kpis(año_pico: int) -> dbc.Row:
+    """
+    Construye la fila de título y KPIs.
+
+    :param año_pico: Año con mayor superficie afectada por incendios
+    :return: Fila de Dash con título y KPIs
+    """
+    return dbc.Row(
+        className="mb-4 align-items-center",
+        children=[
+            # Título
+            dbc.Col(
+                html.Div(
+                    className="h-100 d-flex flex-column justify-content-center",
                     children=[
-                        dbc.Card(
-                            [
-                                dbc.CardHeader(
-                                    "Superficie total afectada por incendios por provincia",
-                                    style={
-                                        "textAlign": "center",
-                                        "fontWeight": "600",
-                                        "fontSize": "1.4rem",
-                                    },
-                                ),
-                                dbc.CardBody(
-                                    dcc.Graph(
-                                        id="graph-mapa",
-                                        figure=mapa_incendios_por_provincia(
-                                            data_df=fuegos,
-                                            provincias_df=provincias_df,
-                                            ccaa=ccaa,
-                                        ),
-                                    )
-                                ),
-                            ]
-                        )
-                    ],
-                    xs=12,
-                    lg=6,
-                    className="mb-3",
-                ),
-                dbc.Col(
-                    id="grafico-mediaanual",
-                    children=[
-                        dbc.Card(
-                            [
-                                dbc.CardHeader(
-                                    "Media anual de superficie afectada por incendios",
-                                    style={
-                                        "textAlign": "center",
-                                        "fontWeight": "600",
-                                        "fontSize": "1.4rem",
-                                    },
-                                ),
-                                dbc.CardBody(
-                                    dcc.Graph(
-                                        id="graph-barras",
-                                        figure=grafico_barras_comparativas(fuegos),
-                                    )
-                                ),
-                            ]
-                        )
-                    ],
-                    xs=12,
-                    lg=6,
-                    className="mb-3",
-                ),
-            ],
-            className="mb-4",
-        ),
-        # --- FILA 3: Gráficos secundarios ---
-        dbc.Row(
-            id="contenedor-graficos-2",
-            children=[
-                dbc.Col(
-                    id="grafico-causas",
-                    children=[
-                        dbc.Card(
-                            [
-                                dbc.CardHeader(
-                                    "Evolución de las causas de incendios",
-                                    style={
-                                        "textAlign": "center",
-                                        "fontWeight": "600",
-                                        "fontSize": "1.4rem",
-                                    },
-                                ),
-                                dbc.CardBody(
-                                    dcc.Graph(
-                                        id="graph-causas",
-                                        figure=grafico_causas_por_año(fuegos),
-                                        style={"height": "400px"},
-                                    )
-                                ),  # Forzamos altura para simular tamaño
-                            ],
-                            className="h-100",
-                        )
-                    ],
-                    xs=12,
-                    lg=6,
-                    className="mb-3",
-                ),
-                dbc.Col(
-                    id="grafico-distribucion",
-                    children=[
-                        dbc.Card(
-                            [
-                                dbc.CardHeader(
-                                    [
-                                        html.Div(
-                                            [
-                                                html.Span(
-                                                    "Distribución de la superficie afectada por incendios mes a mes",
-                                                    style={
-                                                        "fontWeight": "600",
-                                                        "fontSize": "1.4rem",
-                                                    },
-                                                ),
-                                                dbc.Switch(
-                                                    id="toggle-polar-distribucion",
-                                                    label="Vista Polar",
-                                                    value=True,
-                                                    className="mt-2",
-                                                    style={
-                                                        "fontSize": "0.9rem",
-                                                    },
-                                                ),
-                                            ],
-                                            style={
-                                                "textAlign": "center",
-                                                "display": "flex",
-                                                "flexDirection": "column",
-                                                "alignItems": "center",
-                                            },
-                                        ),
-                                    ],
-                                ),
-                                dbc.CardBody(
-                                    dcc.Graph(
-                                        id="graph-distribucion",
-                                        figure=grafico_distribucion_superficie_incendios(
-                                            fuegos, polar=True
-                                        ),
-                                        config={"displayModeBar": False},
-                                    )
-                                ),
-                            ],
-                            className="mb-3",
+                        html.H2(
+                            "PANEL DE CONTROL DE INCENDIOS EN ESPAÑA",
+                            className="display-4",
+                            style=DashboardConfig.TITLE_STYLE,
+                        ),
+                        html.P(
+                            f"Período registrado: {DashboardConfig.AÑO_MIN}-{DashboardConfig.AÑO_MAX}",
+                            className="lead pt-3",
+                            style=DashboardConfig.SUBTITLE_STYLE,
                         ),
                     ],
-                    xs=12,
-                    lg=6,
-                    className="mb-3",
                 ),
-            ],
-            className="mb-4",
-        ),
-        # --- FILA 4: Pie del dashboard ---
-        dbc.Row(
-            id="contenedor-pie",
-            children=[
-                dbc.Col(
-                    id="selectores",
-                    children=[
-                        dbc.Card(
+                xs=12,
+                lg=6,
+                className="mt-3 mb-1",
+            ),
+            # KPIs
+            dbc.Col(
+                dbc.Row(
+                    [
+                        create_kpi_card(
+                            "Total incendios", f"{len(fuegos)}", "kpi-total"
+                        ),
+                        create_kpi_card(
+                            "Área quemada", superficie_formateada(fuegos), "kpi-area"
+                        ),
+                        create_kpi_card("Año pico", f"{año_pico}", "kpi-año-pico"),
+                        create_kpi_card(
+                            "Tendencia", tendencia_incendios(fuegos), "kpi-tendencia"
+                        ),
+                    ]
+                ),
+                xs=12,
+                lg=6,
+            ),
+        ],
+    )
+
+
+def _build_main_charts() -> dbc.Row:
+    """
+    Construye la fila de gráficos principales.
+
+    :return: Fila de Dash con gráficos principales
+    """
+    return dbc.Row(
+        className="mb-4",
+        children=[
+            dbc.Col(
+                create_graph_card(
+                    card_id="grafico-mapa",
+                    header_text="Superficie total afectada por incendios por provincia",
+                    graph_id="graph-mapa",
+                    figure=mapa_incendios_por_provincia(
+                        data_df=fuegos,
+                        provincias_df=provincias_df,
+                        ccaa=ccaa,
+                    ),
+                ),
+                xs=12,
+                lg=6,
+                className="mb-3",
+            ),
+            dbc.Col(
+                create_graph_card(
+                    card_id="grafico-mediaanual",
+                    header_text="Media anual de superficie afectada por incendios",
+                    graph_id="graph-barras",
+                    figure=grafico_barras_comparativas(fuegos),
+                ),
+                xs=12,
+                lg=6,
+                className="mb-3",
+            ),
+        ],
+    )
+
+
+def _build_secondary_charts() -> dbc.Row:
+    """
+    Construye la fila de gráficos secundarios.
+
+    :return: Fila de Dash con gráficos secundarios
+    """
+    polar_switch = dbc.Switch(
+        id="toggle-polar-distribucion",
+        label="Vista Polar",
+        value=True,
+        className="mt-2",
+        style={"fontSize": "0.9rem"},
+    )
+
+    return dbc.Row(
+        className="mb-4",
+        children=[
+            dbc.Col(
+                create_graph_card(
+                    card_id="grafico-causas",
+                    header_text="Evolución de las causas de incendios",
+                    graph_id="graph-causas",
+                    figure=grafico_causas_por_año(fuegos),
+                    graph_style={"height": "400px"},
+                ),
+                xs=12,
+                lg=6,
+                className="mb-3",
+            ),
+            dbc.Col(
+                create_graph_card(
+                    card_id="grafico-distribucion",
+                    header_text="Distribución de la superficie afectada por incendios mes a mes",
+                    graph_id="graph-distribucion",
+                    figure=grafico_distribucion_superficie_incendios(
+                        fuegos, polar=True
+                    ),
+                    graph_config={"displayModeBar": False},
+                    header_extra=[polar_switch],
+                ),
+                xs=12,
+                lg=6,
+                className="mb-3",
+            ),
+        ],
+    )
+
+
+def _build_controls_and_footer() -> dbc.Row:
+    """
+    Construye la fila de controles y créditos.
+
+    :return: Fila de Dash con controles y créditos
+    """
+    return dbc.Row(
+        className="mb-1",
+        children=[
+            dbc.Col(
+                dbc.Card(
+                    dbc.CardBody(
+                        dbc.Row(
                             [
-                                dbc.CardBody(
-                                    [
-                                        dbc.Row(
-                                            [
-                                                dbc.Col(
-                                                    id="seleccion-años",
-                                                    children=[
-                                                        html.Label("Rango de Años"),
-                                                        dcc.RangeSlider(
-                                                            id="slider-años",
-                                                            min=año_min,
-                                                            max=año_max,
-                                                            step=1,
-                                                            value=[año_min, año_max],
-                                                            marks={
-                                                                año_min: str(año_min),
-                                                                año_max: str(año_max),
-                                                            },
-                                                            tooltip={
-                                                                "placement": "bottom"
-                                                            },
-                                                        ),
-                                                    ],
-                                                    xs=12,
-                                                    md=4,
-                                                ),
-                                                dbc.Col(
-                                                    id="seleccion-ccaa",
-                                                    children=[
-                                                        html.Label(
-                                                            "Comunidad Autónoma"
-                                                        ),
-                                                        dcc.Dropdown(
-                                                            id="dropdown-ccaa",
-                                                            options=provincias_df.CCAA.unique().tolist(),
-                                                            placeholder="Selecciona CCAA",
-                                                            style={
-                                                                "color": "black",
-                                                                "fontWeight": "500",
-                                                            },
-                                                        ),
-                                                    ],
-                                                    xs=12,
-                                                    md=3,
-                                                ),
-                                                dbc.Col(
-                                                    id="seleccion-causa",
-                                                    children=[
-                                                        html.Label("Causa(s)"),
-                                                        dcc.Dropdown(
-                                                            id="dropdown-causas",
-                                                            options=[
-                                                                {
-                                                                    "label": causa,
-                                                                    "value": label,
-                                                                }
-                                                                for label, causa in CAUSAS.items()
-                                                            ],
-                                                            placeholder="Causas posibles",
-                                                            multi=True,
-                                                            style={
-                                                                "color": "black",
-                                                                "fontWeight": "500",
-                                                            },
-                                                        ),
-                                                    ],
-                                                    xs=12,
-                                                    md=3,
-                                                ),
-                                                dbc.Col(
-                                                    id="boton-activar-filtros",
-                                                    children=dbc.Row(
-                                                        children=[
-                                                            html.Label("Filtro"),
-                                                            dbc.Button(
-                                                                id="btn-filtrar",
-                                                                children="Activar filtros",
-                                                                color="primary",
-                                                                className="w-100",
-                                                            ),
-                                                            # dcc.Download(
-                                                            #     id="download-component"
-                                                            # ),
-                                                        ]
-                                                    ),
-                                                    xs=12,
-                                                    md=2,
-                                                    className="d-flex align-items-end",
-                                                ),
-                                            ]
-                                        )
-                                    ]
-                                )
+                                _build_year_slider(),
+                                _build_ccaa_dropdown(),
+                                _build_causa_dropdown(),
+                                _build_filter_button(),
                             ]
                         )
-                    ],
-                    xs=12,
-                    lg=10,
+                    )
                 ),
-                dbc.Col(
-                    id="creditos",
+                xs=12,
+                lg=10,
+            ),
+            dbc.Col(
+                html.Div(
+                    className="h-100 d-flex flex-column justify-content-center border rounded p-2 bg-light",
                     children=[
-                        html.Div(
-                            [
-                                html.P(
-                                    "Visualización Avanzada de Datos\n(MAADM-ETSISI/UPM)",
-                                    className="mb-0 fw-bold",
-                                    style={"fontSize": "0.9rem", "textAlign": "right"},
-                                ),
-                                html.P(
-                                    "👨🏻‍💻 Yago Boleas Francisco",
-                                    className="mb-0 text-muted",
-                                    style={"fontSize": "0.6rem", "textAlign": "right"},
-                                ),
-                            ],
-                            className="h-100 d-flex flex-column justify-content-center border rounded p-2 bg-light",
-                        )
+                        html.P(
+                            "Visualización Avanzada de Datos\n(MAADM-ETSISI/UPM)",
+                            className="mb-0 fw-bold",
+                            style={"fontSize": "0.9rem", "textAlign": "right"},
+                        ),
+                        html.P(
+                            "👨🏻‍💻 Yago Boleas Francisco",
+                            className="mb-0 text-muted",
+                            style={"fontSize": "0.6rem", "textAlign": "right"},
+                        ),
                     ],
-                    xs=12,
-                    lg=2,
                 ),
-            ],
-            className="mb-1",
+                xs=12,
+                lg=2,
+            ),
+        ],
+    )
+
+
+def _build_year_slider() -> dbc.Col:
+    """
+    Construye el control de rango de años.
+
+    :return: Columna de Dash con el slider de años
+    """
+    return dbc.Col(
+        children=[
+            html.Label("Rango de Años"),
+            dcc.RangeSlider(
+                id="slider-años",
+                min=DashboardConfig.AÑO_MIN,
+                max=DashboardConfig.AÑO_MAX,
+                step=1,
+                value=[DashboardConfig.AÑO_MIN, DashboardConfig.AÑO_MAX],
+                marks={
+                    DashboardConfig.AÑO_MIN: str(DashboardConfig.AÑO_MIN),
+                    DashboardConfig.AÑO_MAX: str(DashboardConfig.AÑO_MAX),
+                },
+                tooltip={"placement": "bottom"},
+            ),
+        ],
+        xs=12,
+        md=4,
+    )
+
+
+def _build_ccaa_dropdown() -> dbc.Col:
+    """
+    Construye el dropdown de comunidades autónomas.
+
+    :return: Columna de Dash con el dropdown de CCAA
+    """
+    return dbc.Col(
+        children=[
+            html.Label("Comunidad Autónoma"),
+            dcc.Dropdown(
+                id="dropdown-ccaa",
+                options=DashboardConfig.CCAA_OPTIONS,
+                placeholder="Selecciona CCAA",
+                style={"color": "black", "fontWeight": "500"},
+            ),
+        ],
+        xs=12,
+        md=3,
+    )
+
+
+def _build_causa_dropdown() -> dbc.Col:
+    """
+    Construye el dropdown de causas.
+
+    :return: Columna de Dash con el dropdown de causas
+    """
+    return dbc.Col(
+        children=[
+            html.Label("Causa(s)"),
+            dcc.Dropdown(
+                id="dropdown-causas",
+                options=[
+                    {"label": causa, "value": label} for label, causa in CAUSAS.items()
+                ],
+                placeholder="Causas posibles",
+                multi=True,
+                style={"color": "black", "fontWeight": "500"},
+            ),
+        ],
+        xs=12,
+        md=3,
+    )
+
+
+def _build_filter_button() -> dbc.Col:
+    """
+    Construye el botón de filtros.
+
+    :return: Columna de Dash con el botón de filtrar
+    """
+    return dbc.Col(
+        dbc.Row(
+            [
+                html.Label("Filtro"),
+                dbc.Button(
+                    id="btn-filtrar",
+                    children="Activar filtros",
+                    color="primary",
+                    className="w-100",
+                ),
+            ]
         ),
-    ],
-    style={"backgroundColor": "#252222"},
-    fluid=True,
+        xs=12,
+        md=2,
+        className="d-flex align-items-end",
+    )
+
+
+# Inicialización de la app
+app = dash.Dash(
+    __name__,
+    external_stylesheets=DashboardConfig.EXTERNAL_STYLESHEETS,
 )
+
+app.layout = build_layout()
 
 
 @app.callback(
@@ -498,7 +480,10 @@ app.layout = dbc.Container(
         Output("kpi-año-pico", "children"),
         Output("kpi-tendencia", "children"),
     ],
-    [Input("btn-filtrar", "n_clicks"), Input("toggle-polar-distribucion", "value")],
+    [
+        Input("btn-filtrar", "n_clicks"),
+        Input("toggle-polar-distribucion", "value"),
+    ],
     [
         State("slider-años", "value"),
         State("dropdown-ccaa", "value"),
@@ -507,31 +492,38 @@ app.layout = dbc.Container(
     prevent_initial_call=False,
 )
 def actualizar_dashboard(
-    n_clicks, polar, rango_años, ccaa_seleccionada, causas_seleccionadas
-):
-    # Crear copia del dataframe original
+    n_clicks: int | None,
+    polar: bool,
+    rango_años: list[int],
+    ccaa_seleccionada: str | None,
+    causas_seleccionadas: list[int] | None,
+) -> tuple:
+    """
+    Actualiza todos los gráficos y KPIs basándose en los filtros seleccionados.
+
+    :param n_clicks: Número de veces que se ha pulsado el botón de filtrar
+    :param polar: Si el gráfico de distribución debe ser polar
+    :param rango_años: Rango de años seleccionado
+    :param ccaa_seleccionada: Comunidad autónoma seleccionada
+    :param causas_seleccionadas: Lista de causas seleccionadas
+    :return: Tupla con todas las figuras actualizadas y valores de KPIs
+    """
     fuegos_filtrado = fuegos
 
-    # Filtro de rango de años
     if rango_años:
         fuegos_filtrado = fuegos_filtrado.filter(
-            (pl.col("año") >= min(rango_años)) & (pl.col("año") <= max(rango_años))
+            pl.col("año").is_between(min(rango_años), max(rango_años))
         )
 
-    # Filtro de comunidad autónoma
     if ccaa_seleccionada:
         fuegos_filtrado = fuegos_filtrado.filter(
             pl.col("comunidad") == ccaa_seleccionada
         )
 
-    # Filtro de causas
-    if causas_seleccionadas and len(causas_seleccionadas) > 0:
-        causas_seleccionadas = [CAUSAS[causa] for causa in causas_seleccionadas]
-        fuegos_filtrado = fuegos_filtrado.filter(
-            pl.col("causa").is_in(causas_seleccionadas)
-        )
+    if causas_seleccionadas:
+        causas_texto = [CAUSAS[causa] for causa in causas_seleccionadas]
+        fuegos_filtrado = fuegos_filtrado.filter(pl.col("causa").is_in(causas_texto))
 
-    # Generación de los gráficos con los datos filtrados
     fig_mapa = mapa_incendios_por_provincia(
         data_df=fuegos,
         provincias_df=provincias_df,
@@ -540,17 +532,15 @@ def actualizar_dashboard(
     )
 
     fig_barras = grafico_barras_comparativas(fuegos_filtrado)
-
     fig_causas = grafico_causas_por_año(fuegos_filtrado)
-
     fig_distribucion = grafico_distribucion_superficie_incendios(
         fuegos_filtrado, polar=polar
     )
 
-    # Cálculo de los KPIs actualizados
     total_incendios = f"{len(fuegos_filtrado)}"
     area_quemada = superficie_formateada(fuegos_filtrado)
 
+    año_pico = "N/A"
     if len(fuegos_filtrado) > 0:
         año_pico = (
             fuegos_filtrado.group_by("año")
@@ -558,8 +548,6 @@ def actualizar_dashboard(
             .sort("superficie", descending=True)
             .item(0, "año")
         )
-    else:
-        año_pico = "N/A"
 
     tendencia = tendencia_incendios(fuegos_filtrado)
 

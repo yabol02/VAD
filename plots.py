@@ -1,4 +1,9 @@
-import dash_bootstrap_components as dbc
+"""Módulo de generación de gráficos para el dashboard de incendios."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import geopandas as gpd
 import numpy as np
 import plotly.express as px
@@ -8,218 +13,280 @@ from scipy.stats import gaussian_kde
 
 from utils import CAUSA_EMOJI, MESES
 
+if TYPE_CHECKING:
+    from typing import Any
+
+
+# Constantes de configuración
+class PlotConfig:
+    """Configuración de estilos para los gráficos."""
+
+    # Colores para causas
+    COLORES_CAUSAS = ["#8B0000", "#FF4500", "#FF8C00", "#FFD700", "#FFFACD", "#708090"]
+
+    # Configuración de layout común
+    BASE_LAYOUT = {
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "font": {"color": "white"},
+    }
+
+    # Configuración de ejes
+    AXIS_CONFIG = {
+        "title_font": {"color": "white"},
+        "tickfont": {"color": "white"},
+        "showgrid": False,
+    }
+
+    # Umbral para grandes incendios
+    UMBRAL_GRANDE_INCENDIO = 500
+    UMBRAL_KDE_SUPERFICIE = 20
+
 
 def mapa_incendios_por_provincia(
     data_df: pl.DataFrame,
     provincias_df: gpd.GeoDataFrame,
-    focus: str = None,
-    ccaa: gpd.GeoDataFrame = None,
+    focus: str | None = None,
+    ccaa: gpd.GeoDataFrame | None = None,
 ) -> go.Figure:
     """
-    Genera un mapa coroplético de España mostrando la superficie afectada por incendios
-    en cada provincia. Si se especifica una comunidad autónoma (CCAA), el mapa se centra en esa región
-    y destaca los grandes incendios (superficie >= 500 ha) con marcadores.
-
-    Comportamiento:
-        - Si focus se pasa, el mapa se centra en la CCAA indicada y marca incendios
-        grandes (superficie >= 500 ha). Si focus no existe en provincias_df
-        o ccaa, se produce ValueError (índice vacío).
-        - Usa escala de color en hectáreas; marcas de fuego usan la columna lng/lat.
-        - No modifica los DataFrames de entrada.
+    Genera un mapa coroplético de España mostrando la superficie afectada por incendios.
 
     :param data_df: DataFrame con los datos de incendios
-    :type data_df: pl.DataFrame
-    :param provincias_df: GeoDataFrame con las características geográficas de las provincias
-    :type provincias_df: gpd.GeoDataFrame
-    :param focus: Nombre de la comunidad autónoma para centrar el mapa
-    :type focus: str
-    :param ccaa: GeoDataFrame con las características geográficas de las comunidades autónomas
-    :type ccaa: gpd.GeoDataFrame
+    :param provincias_df: GeoDataFrame con las geometrías de las provincias
+    :param focus: Nombre de la CCAA para hacer zoom (opcional)
+    :param ccaa: GeoDataFrame con las geometrías de las comunidades autónomas (opcional)
     :return: Figura de Plotly con el mapa coroplético
-    :rtype: go.Figure
+    :raises ValueError: Si focus no existe en los datos
     """
-    agg_df = data_df.group_by(["provincia"]).agg(
-        [pl.sum("superficie").alias("superficie_total")]
+    # Agregar datos por provincia
+    agg_df = data_df.group_by("provincia").agg(
+        pl.sum("superficie").alias("superficie_total")
     )
 
-    fig = (
-        px.choropleth(
-            agg_df,
-            locations="provincia",
-            geojson=provincias_df,
-            featureidkey="properties.Texto_Alt",
-            color="superficie_total",
-            scope="europe",
-            # hover_data=...,  # TODO: Añadir alguna cosilla interesante
-            color_continuous_scale="Hot_r",
-        )
-        # .add_scattergeo(
-        #     lon=provincias["centro_ccaa_lon"],
-        #     lat=provincias["centro_ccaa_lat"],
-        #     text=provincias["CCAA"],
-        #     mode="markers+text",
-        #     textposition="top center",
-        #     marker=dict(size=5, color="white", line=dict(width=1, color="black")),
-        #     name="Centro de provincia",
-        # )
+    # Crear mapa base
+    fig = px.choropleth(
+        agg_df,
+        locations="provincia",
+        geojson=provincias_df,
+        featureidkey="properties.Texto_Alt",
+        color="superficie_total",
+        scope="europe",
+        color_continuous_scale="Hot_r",
     )
 
-    # Líneas de las CCAA
-    for _, row in ccaa.to_crs(epsg=4326).iterrows():
+    # Añadir líneas de CCAA si están disponibles
+    if ccaa is not None:
+        _add_ccaa_borders(fig, ccaa)
+
+    # Configurar zoom y marcadores según focus
+    if focus:
+        _configure_focus_view(fig, focus, data_df, provincias_df)
+    else:
+        _configure_default_view(fig)
+
+    # Aplicar configuración estética
+    _configure_map_layout(fig)
+
+    return fig
+
+
+def _add_ccaa_borders(fig: go.Figure, ccaa: gpd.GeoDataFrame) -> None:
+    """
+    Añade las líneas de frontera de las CCAA al mapa.
+
+    :param fig: Figura de Plotly donde añadir las fronteras
+    :param ccaa: GeoDataFrame con las geometrías de las comunidades autónomas
+    """
+    ccaa_wgs84 = ccaa.to_crs(epsg=4326)
+
+    for _, row in ccaa_wgs84.iterrows():
         geometry = row.geometry
-        for g in geometry.geoms if geometry.geom_type == "MultiPolygon" else [geometry]:
-            lon, lat = g.exterior.xy
+        geoms = geometry.geoms if geometry.geom_type == "MultiPolygon" else [geometry]
+
+        for geom in geoms:
+            lon, lat = geom.exterior.xy
             fig.add_trace(
                 go.Scattergeo(
                     lon=list(lon),
                     lat=list(lat),
                     mode="lines",
-                    line=dict(color="black", width=1.5),
+                    line={"color": "black", "width": 1.5},
                     name=row["CCAA"],
                     showlegend=False,
                 )
             )
 
-    # Enfoque/Zoom en la CCAA seleccionada
-    if focus:
-        centro_lon = float(
-            provincias_df[provincias_df.CCAA == focus].centro_ccaa_lon.iloc[0]
-        )
-        centro_lat = float(
-            provincias_df[provincias_df.CCAA == focus].centro_ccaa_lat.iloc[0]
-        )
-        fig.update_geos(
-            projection_type="times",
-            center={"lat": centro_lat, "lon": centro_lon},
-            projection_scale=15,
-            visible=False,
-        )
-        grandes_incendios = data_df.filter(
-            (pl.col("superficie") >= 500) & (pl.col("comunidad") == focus)
-        ).with_columns(
-            marker_size=pl.col("superficie").log1p() ** 1.2,
-            hover_text=pl.format(
-                "<b>Incendio:</b><br>Fecha: {}<br>Municipio: {}<br>Superficie: {} ha",
-                pl.col("fecha").cast(pl.Utf8),
-                pl.col("municipio"),
-                pl.col("superficie"),
-            ),
-        )
 
-        fig.add_scattergeo(
-            lon=grandes_incendios["lng"],
-            lat=grandes_incendios["lat"],
-            mode="text",
-            text=[CAUSA_EMOJI[causa] for causa in grandes_incendios["causa"].to_list()],
-            textposition="middle center",
-            textfont=dict(size=grandes_incendios["marker_size"]),
-            marker=dict(
-                size=0, color="blue", opacity=1, line=dict(width=1, color="black")
-            ),
-            hoverinfo="text",
-            hovertext=grandes_incendios["hover_text"],
-            showlegend=False,
-        )
-        fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.85,
-            text=(
-                f'<span style="color: white; font-weight: bold; '
-                f'text-shadow: 1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black;">'
-                f"Grandes incendios en «{focus}» (≥ 500 ha)</span>"
-            ),
-            showarrow=False,
-            font=dict(size=14, family="sans-serif", color="white"),
-        )
-        leyenda_causas = "<br>".join(
-            f"{emoji} {causa}" for causa, emoji in CAUSA_EMOJI.items()
-        )
-        fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=1.0,
-            y=0.8,
-            align="left",
-            text=("<b>Causa del incendio</b><br><br>" f"{leyenda_causas}"),
-            showarrow=False,
-            font=dict(size=12, color="white"),
-            bgcolor="rgba(0, 0, 0, 0.6)",
-            bordercolor="white",
-            borderwidth=1,
-        )
+def _configure_focus_view(
+    fig: go.Figure,
+    focus: str,
+    data_df: pl.DataFrame,
+    provincias_df: gpd.GeoDataFrame,
+) -> None:
+    """
+    Configura la vista con zoom en una CCAA específica.
 
-    else:
-        fig.update_geos(
-            center={"lat": 40.4167, "lon": -3.7033},
-            projection_scale=6.4,
-            visible=False,
-            projection_type="times",
-        )
+    :param fig: Figura de Plotly a configurar
+    :param focus: Nombre de la CCAA para hacer zoom
+    :param data_df: DataFrame con los datos de incendios
+    :param provincias_df: GeoDataFrame con las geometrías de las provincias
+    """
+    ccaa_data = provincias_df[provincias_df.CCAA == focus]
+    centro_lon = float(ccaa_data.centro_ccaa_lon.iloc[0])
+    centro_lat = float(ccaa_data.centro_ccaa_lat.iloc[0])
 
-    # Configuración de leyenda y estética de la figura
-    fig.update_layout(
-        margin=dict(r=0, t=0, l=0, b=0),
-        coloraxis_colorbar=dict(
-            # Título de la leyenda
-            title="Superficie<br>quemada",
-            title_font_color="white",
-            # Unidades de la leyenda
-            tickfont_color="white",
-            ticks="outside",
-            ticklen=5,
-            # Grosor de la barra de la leyenda
-            thicknessmode="pixels",
-            thickness=20,
-            # Ajuste de longitud de la barra de la leyenda
-            lenmode="fraction",
-            len=0.9,
-            # Posicionamiento de la leyenda
-            yanchor="middle",
-            y=0.45,
-            xanchor="left",
-            x=0,
-            orientation="v",  # Orientación de la leyenda
-            bgcolor="rgba(0,0,0,0.3)",  # Fondo de la leyenda
-        ),
-        geo_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
+    fig.update_geos(
+        projection_type="times",
+        center={"lat": centro_lat, "lon": centro_lon},
+        projection_scale=15,
+        visible=False,
     )
 
-    return fig
+    _add_fire_markers(fig, data_df, focus)
+
+
+def _add_fire_markers(fig: go.Figure, data_df: pl.DataFrame, ccaa: str) -> None:
+    """
+    Añade marcadores para grandes incendios en una CCAA.
+
+    :param fig: Figura de Plotly donde añadir los marcadores
+    :param data_df: DataFrame con los datos de incendios
+    :param ccaa: Nombre de la CCAA para filtrar los incendios
+    """
+    grandes_incendios = data_df.filter(
+        (pl.col("superficie") >= PlotConfig.UMBRAL_GRANDE_INCENDIO)
+        & (pl.col("comunidad") == ccaa)
+    ).with_columns(
+        marker_size=pl.col("superficie").log1p() ** 1.2,
+        hover_text=pl.format(
+            "<b>Incendio:</b><br>Fecha: {}<br>Municipio: {}<br>Superficie: {} ha",
+            pl.col("fecha").cast(pl.Utf8),
+            pl.col("municipio"),
+            pl.col("superficie"),
+        ),
+    )
+
+    if grandes_incendios.height == 0:
+        return
+
+    fig.add_scattergeo(
+        lon=grandes_incendios["lng"],
+        lat=grandes_incendios["lat"],
+        mode="text",
+        text=[CAUSA_EMOJI[causa] for causa in grandes_incendios["causa"].to_list()],
+        textposition="middle center",
+        textfont={"size": grandes_incendios["marker_size"]},
+        marker={
+            "size": 0,
+            "color": "blue",
+            "opacity": 1,
+            "line": {"width": 1, "color": "black"},
+        },
+        hoverinfo="text",
+        hovertext=grandes_incendios["hover_text"],
+        showlegend=False,
+    )
+
+    _add_fire_markers_legend(fig, ccaa)
+
+
+def _add_fire_markers_legend(fig: go.Figure, ccaa: str) -> None:
+    """
+    Añade título y leyenda para los marcadores de incendios.
+
+    :param fig: Figura de Plotly donde añadir la leyenda
+    :param ccaa: Nombre de la CCAA para el título
+    """
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.85,
+        text=(
+            f'<span style="color: white; font-weight: bold; '
+            f'text-shadow: 1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black;">'
+            f"Grandes incendios en «{ccaa}» (≥ {PlotConfig.UMBRAL_GRANDE_INCENDIO} ha)</span>"
+        ),
+        showarrow=False,
+        font={"size": 14, "family": "sans-serif", "color": "white"},
+    )
+
+    leyenda_causas = "<br>".join(
+        f"{emoji} {causa}" for causa, emoji in CAUSA_EMOJI.items()
+    )
+
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=1.0,
+        y=0.8,
+        align="left",
+        text=f"<b>Causa del incendio</b><br><br>{leyenda_causas}",
+        showarrow=False,
+        font={"size": 12, "color": "white"},
+        bgcolor="rgba(0, 0, 0, 0.6)",
+        bordercolor="white",
+        borderwidth=1,
+    )
+
+
+def _configure_default_view(fig: go.Figure) -> None:
+    """
+    Configura la vista por defecto centrada en España.
+
+    :param fig: Figura de Plotly a configurar
+    """
+    fig.update_geos(
+        center={"lat": 40.4167, "lon": -3.7033},
+        projection_scale=6.4,
+        visible=False,
+        projection_type="times",
+    )
+
+
+def _configure_map_layout(fig: go.Figure) -> None:
+    """
+    Aplica la configuración de layout al mapa.
+
+    :param fig: Figura de Plotly a configurar
+    """
+    fig.update_layout(
+        margin={"r": 0, "t": 0, "l": 0, "b": 0},
+        coloraxis_colorbar={
+            "title": "Superficie<br>quemada",
+            "title_font_color": "white",
+            "tickfont_color": "white",
+            "ticks": "outside",
+            "ticklen": 5,
+            "thicknessmode": "pixels",
+            "thickness": 20,
+            "lenmode": "fraction",
+            "len": 0.9,
+            "yanchor": "middle",
+            "y": 0.45,
+            "xanchor": "left",
+            "x": 0,
+            "orientation": "v",
+            "bgcolor": "rgba(0,0,0,0.3)",
+        },
+        geo_bgcolor="rgba(0,0,0,0)",
+        **PlotConfig.BASE_LAYOUT,
+    )
 
 
 def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
     """
-    Genera un gráfico de áreas apiladas que muestra la evolución porcentual
-    de las causas de incendios a lo largo de los años.
+    Genera un gráfico de áreas apiladas mostrando la evolución de causas de incendios.
+    Para un solo año, muestra barras horizontales apiladas.
 
-    Si solo hay un año, muestra un gráfico de barras apiladas horizontales.
-
-    Comportamiento:
-        - Agrupa por ('año','causa'), cuenta incendios y calcula el porcentaje relativo al total anual
-            (suma por año = 100% salvo datos faltantes).
-        - Ordena las causas por su media porcentual y asigna colores cíclicamente desde la paleta interna.
-        - Añade etiquetas junto al último año (o dentro de las barras si es un solo año).
-
-    :param fuegos_df: DataFrame que contiene los datos de incendios
-    :type fuegos_df: pl.DataFrame
-    :return: Figura de Plotly con el gráfico de áreas apiladas o barras
-    :rtype: go.Figure
+    :param fuegos_df: DataFrame con los datos de incendios
+    :return: Figura de Plotly con el gráfico
     """
-    agg = (
-        fuegos_df.group_by(["año", "causa"])
-        .agg(pl.len().alias("num_incendios"))
-        .sort(["año", "causa"])
-    )
+    if fuegos_df.height == 0:
+        return _crear_grafico_vacio("No hay datos para mostrar")
 
-    agg = agg.join(
-        agg.group_by("año").agg(pl.sum("num_incendios").alias("total_anual")), on="año"
-    ).with_columns(
-        (pl.col("num_incendios") / pl.col("total_anual") * 100).alias("porcentaje")
-    )
+    agg = _calcular_porcentajes_causas(fuegos_df)
 
     causas_ordenadas = (
         agg.group_by("causa")
@@ -229,39 +296,75 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
         .to_list()
     )
 
-    colores = ["#8B0000", "#FF4500", "#FF8C00", "#FFD700", "#FFFACD", "#708090"]
-
     años_unicos = agg.get_column("año").unique().sort().to_list()
-    if len(años_unicos) == 1:
-        return _grafico_causas_un_año(agg, causas_ordenadas, colores, años_unicos[0])
 
+    # Caso especial: un solo año
+    if len(años_unicos) == 1:
+        return _grafico_causas_un_año(
+            agg, causas_ordenadas, PlotConfig.COLORES_CAUSAS, años_unicos[0]
+        )
+
+    return _grafico_causas_multiples_años(agg, causas_ordenadas, años_unicos)
+
+
+def _calcular_porcentajes_causas(fuegos_df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Calcula los porcentajes de cada causa por año.
+
+    :param fuegos_df: DataFrame con los datos de incendios
+    :return: DataFrame con columnas 'año', 'causa', 'num_incendios', 'porcentaje'
+    """
+    agg = (
+        fuegos_df.group_by(["año", "causa"])
+        .agg(pl.len().alias("num_incendios"))
+        .sort(["año", "causa"])
+    )
+
+    return agg.join(
+        agg.group_by("año").agg(pl.sum("num_incendios").alias("total_anual")),
+        on="año",
+    ).with_columns(
+        (pl.col("num_incendios") / pl.col("total_anual") * 100).alias("porcentaje")
+    )
+
+
+def _grafico_causas_multiples_años(
+    agg: pl.DataFrame,
+    causas_ordenadas: list[str],
+    años_unicos: list[int],
+) -> go.Figure:
+    """
+    Crea el gráfico de áreas apiladas para múltiples años.
+
+    :param agg: DataFrame con los datos agregados
+    :param causas_ordenadas: Lista de causas ordenadas
+    :param años_unicos: Lista de años únicos
+    :return: Figura de Plotly con el gráfico
+    """
+    fig = go.Figure()
     ultimo_año = agg.get_column("año").max()
     etiquetas_data = []
 
-    fig = go.Figure()
-
     for i, causa in enumerate(causas_ordenadas):
         df_causa = agg.filter(pl.col("causa") == causa)
-        x_vals = df_causa.get_column("año").to_list()
-        y_vals = df_causa.get_column("porcentaje").to_list()
-        n_vals = df_causa.get_column("num_incendios").to_list()
-        color_causa = colores[i % len(colores)]
+        color_causa = PlotConfig.COLORES_CAUSAS[i % len(PlotConfig.COLORES_CAUSAS)]
 
         fig.add_trace(
             go.Scatter(
-                x=x_vals,
-                y=y_vals,
+                x=df_causa.get_column("año").to_list(),
+                y=df_causa.get_column("porcentaje").to_list(),
                 mode="lines+markers",
-                line=dict(width=0.6, color=color_causa),
-                marker=dict(size=2, symbol="circle", color=color_causa),
+                line={"width": 0.6, "color": color_causa},
+                marker={"size": 2, "symbol": "circle", "color": color_causa},
                 stackgroup="one",
                 name=str(causa),
                 hovertemplate="<b>%{x}</b><br>%{y:.2f}% (%{text} incendios)",
-                text=n_vals,
+                text=df_causa.get_column("num_incendios").to_list(),
             )
         )
 
-        ultimo_y = etiquetas_data[-1]["y_max"] if len(etiquetas_data) else 0
+        # Posición para etiqueta
+        ultimo_y = etiquetas_data[-1]["y_max"] if etiquetas_data else 0
         causa_y = df_causa.filter(pl.col("año") == ultimo_año).get_column("porcentaje")
 
         etiquetas_data.append(
@@ -282,47 +385,31 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
             text=etiqueta["causa"],
             showarrow=False,
             xanchor="left",
-            xshift=0,
             textangle=60,
-            font=dict(color=etiqueta["color"], size=8),
+            font={"color": etiqueta["color"], "size": 8},
         )
 
     fig.update_layout(
         showlegend=False,
-        legend_title_text="Causa",
-        legend=dict(
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(color="white", size=8),
-            orientation="v",
-            x=1.02,
-            y=1,
-            xanchor="left",
-            yanchor="top",
-        ),
-        xaxis=dict(
-            type="category",
-            showgrid=False,
-            tickmode="array",
-            ticks="outside",
-            tickvals=[a for a in años_unicos][::3],
-            title_font=dict(size=10, color="white"),
-            tickfont=dict(color="white"),
-            ticklen=5,
-            tickcolor="white",
-            tickwidth=1,
-        ),
-        yaxis=dict(
-            range=[0, 100],
-            ticksuffix="%",
-            title_font=dict(size=14, color="white"),
-            tickfont=dict(color="white"),
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.1)",
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(t=40),
-        height=None,
+        xaxis={
+            "type": "category",
+            "tickmode": "array",
+            "tickvals": años_unicos[::3],
+            "ticks": "outside",
+            "ticklen": 5,
+            "tickcolor": "white",
+            "tickwidth": 1,
+            **PlotConfig.AXIS_CONFIG,
+        },
+        yaxis={
+            "range": [0, 100],
+            "ticksuffix": "%",
+            "showgrid": True,
+            "gridcolor": "rgba(255,255,255,0.1)",
+            **PlotConfig.AXIS_CONFIG,
+        },
+        **PlotConfig.BASE_LAYOUT,
+        margin={"t": 40},
         autosize=True,
     )
 
@@ -330,28 +417,21 @@ def grafico_causas_por_año(fuegos_df: pl.DataFrame) -> go.Figure:
 
 
 def _grafico_causas_un_año(
-    agg: pl.DataFrame, causas_ordenadas: list, colores: list, año: int
+    agg: pl.DataFrame,
+    causas_ordenadas: list[str],
+    colores: list[str],
+    año: int,
 ) -> go.Figure:
     """
-    Crea un gráfico de barras horizontales apiladas para un solo año.
+    Crea un gráfico de barras horizontales para un solo año.
 
-    Únicamente se utiliza cuando el DataFrame contiene datos de un solo año para
-    representar la distribución porcentual de las causas de incendios.
-
-    :param agg: DataFrame agregado con datos de incendios
-    :type agg: pl.DataFrame
-    :param causas_ordenadas: Lista de causas ordenadas por frecuencia
-    :type causas_ordenadas: list
+    :param agg: DataFrame con los datos agregados
+    :param causas_ordenadas: Lista de causas ordenadas
     :param colores: Lista de colores para las causas
-    :type colores: list
-    :param año: El año único presente en los datos
-    :type año: int
-    :return: Figura de Plotly con barras horizontales apiladas
-    :rtype: go.Figure
+    :param año: Año específico
+    :return: Figura de Plotly con el gráfico
     """
     fig = go.Figure()
-
-    posicion_acumulada = 0
 
     for i, causa in enumerate(causas_ordenadas):
         df_causa = agg.filter(pl.col("causa") == causa)
@@ -369,39 +449,34 @@ def _grafico_causas_un_año(
                 y=[str(año)],
                 orientation="h",
                 name=str(causa),
-                marker=dict(
-                    color=color_causa, line=dict(color="rgba(0,0,0,0.3)", width=1)
+                marker={
+                    "color": color_causa,
+                    "line": {"color": "rgba(0,0,0,0.3)", "width": 1},
+                },
+                hovertemplate=(
+                    f"<b>{causa}</b><br>{porcentaje:.1f}% "
+                    f"({num_incendios} incendios)<extra></extra>"
                 ),
-                hovertemplate=f"<b>{causa}</b><br>{porcentaje:.1f}% ({num_incendios} incendios)<extra></extra>",
                 text=f"{causa}<br>{porcentaje:.1f}%",
                 textposition="inside",
-                textfont=dict(color="white", size=10, family="Arial Black"),
+                textfont={"color": "white", "size": 10, "family": "Arial Black"},
                 insidetextanchor="middle",
             )
         )
 
-        posicion_acumulada += porcentaje
-
     fig.update_layout(
         barmode="stack",
         showlegend=False,
-        xaxis=dict(
-            range=[0, 100],
-            ticksuffix="%",
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.1)",
-            title_font=dict(size=12, color="white"),
-            tickfont=dict(color="white", size=10),
-        ),
-        yaxis=dict(
-            title="Año",
-            showgrid=False,
-            title_font=dict(size=12, color="white"),
-            tickfont=dict(color="white", size=12),
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=80, r=40, t=40, b=60),
+        xaxis={
+            "range": [0, 100],
+            "ticksuffix": "%",
+            "showgrid": True,
+            "gridcolor": "rgba(255,255,255,0.1)",
+            **PlotConfig.AXIS_CONFIG,
+        },
+        yaxis={"title": "Año", **PlotConfig.AXIS_CONFIG},
+        **PlotConfig.BASE_LAYOUT,
+        margin={"l": 80, "r": 40, "t": 40, "b": 60},
         height=200,
     )
 
@@ -410,44 +485,31 @@ def _grafico_causas_un_año(
 
 def grafico_barras_comparativas(fuegos_df: pl.DataFrame) -> go.Figure:
     """
-    Genera un gráfico de barras horizontales comparando regiones por superficie quemada.
+    Genera un gráfico de barras horizontales comparando regiones.
+    Muestra top 10 CCAA si hay múltiples, o todas las provincias si solo hay una CCAA.
 
-    Comportamiento adaptativo:
-      - Si hay múltiples comunidades: se muestra un top 10 de comunidades autónomas
-      - Si hay una sola comunidad: se muestran todas las provincias de esa comunidad
-
-    Calcula:
-      - Número de años únicos y promedia la superficie y cantidad por año
-      - Ordena por media anual de superficie
-      - Añade línea vertical con la media y anotaciones
-
-    :param fuegos_df: DataFrame que contiene los datos de incendios
-    :type fuegos_df: pl.DataFrame
+    :param fuegos_df: DataFrame con los datos de incendios
     :return: Figura de Plotly con el gráfico de barras
-    :rtype: go.Figure
     """
     if fuegos_df.height == 0:
-        return _grafico_vacio("No hay datos para mostrar")
+        return _crear_grafico_vacio("No hay datos para mostrar")
 
-    n_years = fuegos_df.select(pl.col("año").n_unique().alias("n")).get_column("n")[0]
+    n_years = fuegos_df.select(pl.col("año").n_unique().alias("n")).item(0, "n")
 
+    # Se muestran comunidades o provincias
     if fuegos_df.get_column("comunidad").n_unique() == 1:
-        # Se muestran las provincias de la comunidad seleccionada
         comunidad_nombre = fuegos_df.get_column("comunidad").unique()[0]
         return _grafico_provincias(fuegos_df, n_years, comunidad_nombre)
-    else:
-        # Se muestra el top 10 de comunidades más afectadas
-        return _grafico_comunidades(fuegos_df, n_years)
+
+    return _grafico_comunidades(fuegos_df, n_years)
 
 
-def _grafico_vacio(mensaje: str) -> go.Figure:
+def _crear_grafico_vacio(mensaje: str) -> go.Figure:
     """
-    Genera un gráfico vacío con un mensaje centrado.
+    Crea un gráfico vacío con un mensaje.
 
-    :param mensaje: Mensaje a mostrar en el gráfico vacío
-    :type mensaje: str
-    :return: Figura de Plotly con el mensaje centrado
-    :rtype: go.Figure
+    :param mensaje: Mensaje a mostrar en el gráfico
+    :return: Figura de Plotly con el mensaje
     """
     fig = go.Figure()
 
@@ -458,15 +520,14 @@ def _grafico_vacio(mensaje: str) -> go.Figure:
         x=0.5,
         y=0.5,
         showarrow=False,
-        font=dict(size=14, color="white"),
+        font={"size": 14, "color": "white"},
     )
 
     fig.update_layout(
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=0, r=0, t=0, b=0),
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        **PlotConfig.BASE_LAYOUT,
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
         height=400,
     )
 
@@ -477,14 +538,64 @@ def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
     """
     Genera gráfico de barras para el top 10 de comunidades autónomas.
 
-    :param fuegos_df: DataFrame que contiene los datos de incendios
-    :type fuegos_df: pl.DataFrame
-    :param n_years: Número de años únicos en el DataFrame
-    :type n_years: int
-    :return: Figura de Plotly con el gráfico de barras
-    :rtype: go.Figure
+    :param fuegos_df: DataFrame con los datos de incendios
+    :param n_years: Número de años en el periodo
+    :return: Figura de Plotly con el gráfico
     """
-    agg = fuegos_df.group_by("comunidad").agg(
+    agg = _agregar_datos_regionales(fuegos_df, "comunidad", n_years)
+
+    if agg.height == 0:
+        return _crear_grafico_vacio("No hay datos para mostrar")
+
+    # Limitar a top 10
+    agg = agg.head(10)
+
+    return _crear_grafico_barras_horizontal(
+        agg,
+        campo_region="comunidad",
+        titulo_porcentaje="nacional",
+    )
+
+
+def _grafico_provincias(
+    fuegos_df: pl.DataFrame,
+    n_years: int,
+    comunidad_nombre: str,
+) -> go.Figure:
+    """
+    Genera gráfico de barras para las provincias de una comunidad.
+
+    :param fuegos_df: DataFrame con los datos de incendios
+    :param n_years: Número de años en el periodo
+    :param comunidad_nombre: Nombre de la comunidad autónoma
+    :return: Figura de Plotly con el gráfico
+    """
+    agg = _agregar_datos_regionales(fuegos_df, "provincia", n_years)
+
+    if agg.height == 0:
+        return _crear_grafico_vacio(f"No hay datos para {comunidad_nombre}")
+
+    return _crear_grafico_barras_horizontal(
+        agg,
+        campo_region="provincia",
+        titulo_porcentaje=comunidad_nombre,
+    )
+
+
+def _agregar_datos_regionales(
+    fuegos_df: pl.DataFrame,
+    campo: str,
+    n_years: int,
+) -> pl.DataFrame:
+    """
+    Agrega datos por región calculando medias anuales.
+
+    :param fuegos_df: DataFrame con los datos de incendios
+    :param campo: Campo por el que agregar ('comunidad' o 'provincia')
+    :param n_years: Número de años en el periodo
+    :return: DataFrame con columnas agregadas
+    """
+    agg = fuegos_df.group_by(campo).agg(
         [
             pl.len().alias("cantidad"),
             pl.col("superficie").sum().alias("superficie_total"),
@@ -492,74 +603,74 @@ def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
     )
 
     if agg.height == 0:
-        return _grafico_vacio("No hay datos para mostrar")
+        return agg
 
-    total_superficie_nacional = agg.select(
-        pl.col("superficie_total").sum().alias("total")
-    ).get_column("total")[0]
-
-    agg = (
-        agg.with_columns(
-            (pl.col("cantidad") / n_years).alias("media_anual_cantidad"),
-            (pl.col("superficie_total") / n_years).alias("media_anual_superficie"),
-            (pl.col("superficie_total") / total_superficie_nacional * 100).alias(
-                "pct_sobre_nacional"
-            ),
-        )
-        .sort("media_anual_superficie", descending=True)
-        .head(10)
+    total_superficie = agg.select(pl.col("superficie_total").sum().alias("total")).item(
+        0, "total"
     )
 
-    regiones = agg.get_column("comunidad").to_list()
+    return agg.with_columns(
+        (pl.col("cantidad") / n_years).alias("media_anual_cantidad"),
+        (pl.col("superficie_total") / n_years).alias("media_anual_superficie"),
+        (pl.col("superficie_total") / total_superficie * 100).alias("pct_sobre_total"),
+    ).sort("media_anual_superficie", descending=True)
+
+
+def _crear_grafico_barras_horizontal(
+    agg: pl.DataFrame,
+    campo_region: str,
+    titulo_porcentaje: str,
+) -> go.Figure:
+    """
+    Crea el gráfico de barras horizontales con los datos agregados.
+
+    :param agg: DataFrame con los datos agregados
+    :param campo_region: Nombre del campo de región ('comunidad' o 'provincia')
+    :param titulo_porcentaje: Texto para el título del porcentaje
+    :return: Figura de Plotly con el gráfico
+    """
+    regiones = agg.get_column(campo_region).to_list()
     x_superficie = agg.get_column("media_anual_superficie").to_list()
     media_cantidad = agg.get_column("media_anual_cantidad").to_list()
-    pct_nacional = agg.get_column("pct_sobre_nacional").to_list()
+    pct_total = agg.get_column("pct_sobre_total").to_list()
     superficie_tot = agg.get_column("superficie_total").to_list()
     cantidad_tot = agg.get_column("cantidad").to_list()
 
-    media_nacional = (
-        sum(x_superficie) / len(x_superficie) if len(x_superficie) > 0 else 0
-    )
+    media_regional = sum(x_superficie) / len(x_superficie) if x_superficie else 0
 
     fig = go.Figure()
 
+    # Barras
     fig.add_trace(
         go.Bar(
             x=x_superficie,
             y=list(range(len(regiones))),
             orientation="h",
-            marker=dict(
-                color=x_superficie,
-                colorscale="Hot_r",
-            ),
+            marker={"color": x_superficie, "colorscale": "Hot_r"},
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
                 "Media anual de superficie quemada: %{x:.1f} ha<br>"
                 "Media anual de cantidad de incendios: %{customdata[1]:.2f} incendios/año<br>"
                 "Total del periodo: %{customdata[2]:.0f} ha en %{customdata[3]:.0f} incendios<br>"
-                "Porcentaje sobre superficie nacional: %{customdata[4]:.2f}%<extra></extra>"
+                f"Porcentaje sobre superficie {titulo_porcentaje}: %{{customdata[4]:.2f}}%<extra></extra>"
             ),
             customdata=list(
-                zip(
-                    regiones,
-                    media_cantidad,
-                    superficie_tot,
-                    cantidad_tot,
-                    pct_nacional,
-                )
+                zip(regiones, media_cantidad, superficie_tot, cantidad_tot, pct_total)
             ),
         )
     )
 
-    if len(x_superficie) > 1 and media_nacional > 0:
+    # Línea de media
+    if len(x_superficie) > 1 and media_regional > 0:
         fig.add_vline(
-            x=media_nacional,
-            line=dict(color="white", dash="dash"),
-            annotation_text=f"Media del top 10: {media_nacional:.1f} ha/año",
+            x=media_regional,
+            line={"color": "white", "dash": "dash"},
+            annotation_text=f"Media: {media_regional:.1f} ha/año",
             annotation_position="bottom left",
-            annotation_font=dict(color="white", size=10),
+            annotation_font={"color": "white", "size": 10},
         )
 
+    # Etiquetas de regiones
     for i, region in enumerate(regiones):
         fig.add_annotation(
             xref="paper",
@@ -569,379 +680,284 @@ def _grafico_comunidades(fuegos_df: pl.DataFrame, n_years: int) -> go.Figure:
             showarrow=False,
             xanchor="left",
             xshift=-10,
-            font=dict(size=8, color="white"),
+            font={"size": 8, "color": "white"},
             align="right",
         )
 
-    for i, (xi, mc, pct) in enumerate(zip(x_superficie, media_cantidad, pct_nacional)):
+    # Estadísticas adicionales
+    for i, (xi, mc, pct) in enumerate(zip(x_superficie, media_cantidad, pct_total)):
         fig.add_annotation(
             x=max(100, xi * 1.2),
             y=i,
             text=f"{mc:.1f} / {pct:.1f}%",
             showarrow=False,
             xanchor="left",
-            font=dict(size=8, color="#AAAAAA"),
+            font={"size": 8, "color": "#AAAAAA"},
             valign="middle",
         )
 
     fig.update_layout(
-        xaxis=dict(autorange="reversed"),
-        yaxis=dict(autorange="reversed", showticklabels=False),
+        xaxis={"autorange": "reversed", "range": [0, max(x_superficie)]},
+        yaxis={"autorange": "reversed", "showticklabels": False},
         showlegend=False,
-        margin=dict(l=0, r=100, t=70, b=40),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="white"),
-        height=None,
+        margin={"l": 0, "r": 100, "t": 70, "b": 40},
+        **PlotConfig.BASE_LAYOUT,
         autosize=True,
     )
-
-    fig.update_xaxes(range=[0, max(x_superficie)])
-
-    return fig
-
-
-def _grafico_provincias(
-    fuegos_df: pl.DataFrame, n_years: int, comunidad_nombre: str
-) -> go.Figure:
-    """
-    Genera gráfico de barras para las provincias de una comunidad autónoma.
-
-    :param fuegos_df: DataFrame que contiene los datos de incendios
-    :type fuegos_df: pl.DataFrame
-    :param n_years: Número de años únicos en el DataFrame
-    :type n_years: int
-    :param comunidad_nombre: Nombre de la comunidad autónoma
-    :type comunidad_nombre: str
-    :return: Figura de Plotly con el gráfico de barras
-    :rtype: go.Figure
-    """
-    agg = fuegos_df.group_by("provincia").agg(
-        [
-            pl.len().alias("cantidad"),
-            pl.col("superficie").sum().alias("superficie_total"),
-        ]
-    )
-
-    if agg.height == 0:
-        return _grafico_vacio(f"No hay datos para {comunidad_nombre}")
-
-    total_superficie_comunidad = agg.select(
-        pl.col("superficie_total").sum().alias("total")
-    ).get_column("total")[0]
-
-    agg = agg.with_columns(
-        (pl.col("cantidad") / n_years).alias("media_anual_cantidad"),
-        (pl.col("superficie_total") / n_years).alias("media_anual_superficie"),
-        (pl.col("superficie_total") / total_superficie_comunidad * 100).alias(
-            "pct_sobre_comunidad"
-        ),
-    ).sort("media_anual_superficie", descending=True)
-
-    provincias = agg.get_column("provincia").to_list()
-    x_superficie = agg.get_column("media_anual_superficie").to_list()
-    media_cantidad = agg.get_column("media_anual_cantidad").to_list()
-    pct_comunidad = agg.get_column("pct_sobre_comunidad").to_list()
-    superficie_tot = agg.get_column("superficie_total").to_list()
-    cantidad_tot = agg.get_column("cantidad").to_list()
-
-    media_comunidad = (
-        sum(x_superficie) / len(x_superficie) if len(x_superficie) > 0 else 0
-    )
-
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Bar(
-            x=x_superficie,
-            y=list(range(len(provincias))),
-            orientation="h",
-            marker=dict(
-                color=x_superficie,
-                colorscale="Hot_r",
-            ),
-            hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "Media anual de superficie quemada: %{x:.1f} ha<br>"
-                "Media anual de cantidad de incendios: %{customdata[1]:.2f} incendios/año<br>"
-                "Total del periodo: %{customdata[2]:.0f} ha en %{customdata[3]:.0f} incendios<br>"
-                f"Porcentaje sobre superficie de {comunidad_nombre}: %{{customdata[4]:.2f}}%<extra></extra>"
-            ),
-            customdata=list(
-                zip(
-                    provincias,
-                    media_cantidad,
-                    superficie_tot,
-                    cantidad_tot,
-                    pct_comunidad,
-                )
-            ),
-        )
-    )
-
-    if len(provincias) > 1 and media_comunidad > 0:
-        fig.add_vline(
-            x=media_comunidad,
-            line=dict(color="white", dash="dash"),
-            annotation_text=f"Media de {comunidad_nombre}: {media_comunidad:.1f} ha/año",
-            annotation_position="bottom left",
-            annotation_font=dict(color="white", size=10),
-        )
-
-    for i, provincia in enumerate(provincias):
-        fig.add_annotation(
-            xref="paper",
-            x=1.02,
-            y=i,
-            text=provincia,
-            showarrow=False,
-            xanchor="left",
-            xshift=-10,
-            font=dict(size=8, color="white"),
-            align="right",
-        )
-
-    for i, (xi, mc, pct) in enumerate(zip(x_superficie, media_cantidad, pct_comunidad)):
-        fig.add_annotation(
-            x=max(100, xi * 1.2),
-            y=i,
-            text=f"{mc:.1f} / {pct:.1f}%",
-            showarrow=False,
-            xanchor="left",
-            font=dict(size=8, color="#AAAAAA"),
-            valign="middle",
-        )
-
-    fig.update_layout(
-        xaxis=dict(autorange="reversed"),
-        yaxis=dict(autorange="reversed", showticklabels=False),
-        showlegend=False,
-        margin=dict(l=0, r=100, t=70, b=40),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="white"),
-        height=None,
-        autosize=True,
-    )
-
-    fig.update_xaxes(range=[0, max(x_superficie)])
 
     return fig
 
 
 def grafico_distribucion_superficie_incendios(
-    fuegos_df: pl.DataFrame, polar: bool = False
+    fuegos_df: pl.DataFrame,
+    polar: bool = False,
 ) -> go.Figure:
     """
-    Genera un gráfico que muestra la distribución de la superficie de incendios
-    a lo largo de las semanas del año utilizando una estimación de densidad kernel (KDE).
+    Genera un gráfico de distribución de superficie de incendios por semana usando KDE.
+    Solo considera incendios > 20 ha para la visualización.
 
-    Para poder visualizar más cómodamente las distribuciones, se realiza el siguiente procesamiento de los datos:
-        - Para calcular la densidad, solo se consideran incendios con superficie > 20 ha.
-        - Se calcula la KDE para cada semana y se multiplica por la media de superficie de esa semana.
-        - Se interpola la densidad entre semanas para suavizar la visualización.
-        - Se aplica la raíz cuadrada a la matriz de densidades para mejorar la visibilidad de las áreas con baja densidad.
-
-    Permite visualizarse en formato cartesiano o polar.
-
-    :param fuegos_df: DataFrame que contiene los datos de incendios
-    :type fuegos_df: pl.DataFrame
-    :param polar: Indica si el gráfico debe ser en formato polar o cartesiano
-    :type polar: bool
-    :return: Figura generada
-    :rtype: go.Figure
+    :param fuegos_df: DataFrame con los datos de incendios
+    :param polar: Si True, crea gráfico polar; si False, cartesiano
+    :return: Figura de Plotly con el gráfico de distribución
     """
     if fuegos_df.height == 0:
-        return _grafico_vacio("No hay datos de incendios disponibles")
+        return _crear_grafico_vacio("No hay datos de incendios disponibles")
 
-    fuegos_df = fuegos_df.filter(pl.col("superficie") > 20)
+    fuegos_df = fuegos_df.filter(
+        pl.col("superficie") > PlotConfig.UMBRAL_KDE_SUPERFICIE
+    )
 
     if fuegos_df.height == 0:
-        return _grafico_vacio(
-            "No hay incendios con superficie > 20 ha en el periodo seleccionado"
+        return _crear_grafico_vacio(
+            f"No hay incendios con superficie > {PlotConfig.UMBRAL_KDE_SUPERFICIE} ha"
         )
 
-    # Agregar por semana
-    agg = fuegos_df.group_by("semana").agg(pl.col("superficie")).sort("semana")
+    kde_matrix, x_grid, semanas = _calcular_kde(fuegos_df)
 
-    if agg.height == 0:
-        return _grafico_vacio("No hay datos suficientes para generar la distribución")
+    if kde_matrix is None:
+        return _crear_grafico_vacio("Datos insuficientes para generar la distribución")
+
+    if polar:
+        return _crear_grafico_polar_kde(kde_matrix, x_grid, semanas)
+
+    return _crear_grafico_cartesiano_kde(kde_matrix, x_grid, semanas)
+
+
+def _calcular_kde(
+    fuegos_df: pl.DataFrame,
+) -> tuple[np.ndarray | None, np.ndarray, np.ndarray]:
+    """
+    Calcula la matriz KDE para cada semana del año.
+
+    :param fuegos_df: DataFrame con los datos de incendios
+    :return: Tupla con (kde_matrix, x_grid, semanas)
+    """
+    # Se agrega por semana
+    agg = fuegos_df.group_by("semana").agg(pl.col("superficie")).sort("semana")
 
     semanas = agg["semana"].to_numpy()
     n_semanas = len(semanas)
 
     if n_semanas < 3:
-        return _grafico_vacio(
-            f"Datos insuficientes para KDE: solo hay {n_semanas} semana(s) con incendios > 20 ha"
-        )
+        return None, np.array([]), semanas
 
-    # Superficie para el grid
+    # Se crea grid de superficie
     todas_superficies = fuegos_df["superficie"].to_numpy()
-    superficie_max = min(
-        np.percentile(todas_superficies, 99), 1000
-    )
+    superficie_max = min(np.percentile(todas_superficies, 99), 1000)
     superficie_max = max(superficie_max, 100)
 
     x_grid = np.linspace(0, superficie_max, 500)
-
     kde_matrix = np.zeros((2 * n_semanas, len(x_grid)))
-    stats_list = np.empty((2 * n_semanas, 2))
 
+    # Se calcula KDE para cada semana
     for i, vals in enumerate(agg["superficie"]):
         data = np.asanyarray(vals)
 
         if data.size == 0:
             continue
 
-        media = np.mean(data) if data.size > 0 else 0
-        mediana = np.median(data) if data.size > 0 else 0
+        media = np.mean(data)
 
-        stats_list[i * 2, 0] = media
-        stats_list[i * 2, 1] = mediana
-
-        # Se calcula el KDE solo si hay más de un punto
         if data.size > 1:
             try:
                 kde = gaussian_kde(data)
                 kde_matrix[i * 2, :] = kde(x_grid) * media
-            except Exception as e:
+            except Exception:
                 kde_matrix[i * 2, :] = np.zeros_like(x_grid)
-                raise Exception(
-                    f"Error al calcular KDE; se usará distribución uniforme simple\n{e}"
-                )
         else:
-            # Si existe tan solo un punto se pone un pico en ese valor
+            # Un solo punto: pico en ese valor
             idx_cercano = np.argmin(np.abs(x_grid - data.item()))
             kde_matrix[i * 2, idx_cercano] = media
 
-    # Interpolación entre semanas
+    # Se interpola entre semanas
     kde_matrix[1::2, :] = (
         kde_matrix[0::2, :] + np.vstack([kde_matrix[2::2, :], kde_matrix[0:1, :]])
     ) / 2
 
-    # Aplicar transformación de raíz cuadrada solo si hay valores
+    # Se aplica una transformación de raíz cuadrada para mejorar visibilidad
     if np.any(kde_matrix > 0):
         np.sqrt(kde_matrix, out=kde_matrix)
 
-    base_layout = dict(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="white"),
-        margin=dict(t=30, b=30, l=40, r=30),
-        autosize=True,
-    )
+    return kde_matrix, x_grid, semanas
 
-    if not polar:
-        fig = go.Figure(
-            data=go.Heatmap(
-                z=kde_matrix,
-                x=x_grid,
-                y=np.repeat(semanas, 2),
-                colorscale="Hot",
-                colorbar=dict(
-                    title="Densidad KDE",
-                    title_font=dict(color="white"),
-                    tickfont=dict(color="white"),
-                    thickness=20,
-                ),
-                hovertemplate=(
-                    "<b>Semana:</b> %{y:.0f}<br>"
-                    + "<b>Superficie:</b> %{x:.0f} ha<br>"
-                    + "<b>Densidad:</b> %{z:.4f}<extra></extra>"
-                ),
-            )
-        )
 
-        fig.update_layout(**base_layout)
-        fig.update_xaxes(
-            title_text="Superficie (ha)",
-            title_font=dict(color="white"),
-            tickfont=dict(color="white"),
-            showgrid=False,
-        )
-        fig.update_yaxes(
-            title_text="Semana",
-            title_font=dict(color="white"),
-            tickfont=dict(color="white"),
-            showgrid=False,
-            range=[min(semanas) - 1, max(semanas) + 1],
-        )
-    else:
-        n = kde_matrix.shape[0]
-        angles = np.linspace(0, 360, n, endpoint=False)
+def _crear_grafico_cartesiano_kde(
+    kde_matrix: np.ndarray,
+    x_grid: np.ndarray,
+    semanas: np.ndarray,
+) -> go.Figure:
+    """
+    Crea el gráfico cartesiano de la distribución KDE.
 
-        thetas = []
-        radius = []
-        intensities = []
-        hover = []
-
-        for i, theta in enumerate(angles):
-            sem_actual = semanas[i // 2] if i // 2 < len(semanas) else semanas[-1]
-            for j, superficie in enumerate(x_grid):
-                thetas.append(theta)
-                radius.append(superficie)
-                intensities.append(kde_matrix[i, j])
-                hover.append(sem_actual)
-
-        # Ajuste dinámico de los tamaños de los marcadores
-        MAX_MARKER_SIZE = 8
-        MIN_MARKER_SIZE = 0.1
-        r_array = np.array(radius)
-        r_min, r_max = r_array.min(), r_array.max()
-
-        if r_max > r_min:
-            sizes = ((r_array - r_min) / (r_max - r_min)) ** 2 * (
-                MAX_MARKER_SIZE - MIN_MARKER_SIZE
-            ) + MIN_MARKER_SIZE
-        else:
-            sizes = np.full_like(r_array, (MAX_MARKER_SIZE + MIN_MARKER_SIZE) / 2)
-
-        fig = go.Figure(
-            go.Scatterpolar(
-                r=radius,
-                theta=thetas,
-                mode="markers",
-                marker=dict(
-                    size=sizes,
-                    color=intensities,
-                    colorscale="Hot",
-                    line_width=0,
-                    opacity=0.8,
-                ),
-                customdata=hover,
-                hovertemplate=(
-                    "<b>Semana:</b> %{customdata}<br>"
-                    + "<b>Superficie:</b> %{r:.0f} ha<br>"
-                    + "<b>Densidad:</b> %{marker.color:.4f}<extra></extra>"
-                ),
-            )
-        )
-
-        meses_angles = np.linspace(0, 360, 12, endpoint=False)
-        fig.update_layout(**base_layout)
-        fig.update_layout(
-            showlegend=False,
-            polar=dict(
-                bgcolor="rgba(0,0,0,0)",
-                angularaxis=dict(
-                    tickmode="array",
-                    tickvals=meses_angles,
-                    ticktext=MESES,
-                    direction="clockwise",
-                    rotation=90,
-                    gridcolor="rgba(255,255,255,0.1)",
-                    tickfont=dict(size=12, color="white"),
-                ),
-                radialaxis=dict(
-                    title="Superficie (ha)",
-                    title_font=dict(size=10),
-                    tickfont=dict(size=9, color="rgba(255,255,255,0.6)"),
-                    gridcolor="rgba(255,255,255,0.05)",
-                    angle=45,
-                    showline=False,
-                    range=[0, superficie_max],
-                ),
+    :param kde_matrix: Matriz KDE
+    :param x_grid: Grid de superficies
+    :param semanas: Array de semanas
+    :return: Figura de Plotly con el gráfico
+    """
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=kde_matrix,
+            x=x_grid,
+            y=np.repeat(semanas, 2),
+            colorscale="Hot",
+            colorbar={
+                "title": "Densidad KDE",
+                "title_font": {"color": "white"},
+                "tickfont": {"color": "white"},
+                "thickness": 20,
+            },
+            hovertemplate=(
+                "<b>Semana:</b> %{y:.0f}<br>"
+                "<b>Superficie:</b> %{x:.0f} ha<br>"
+                "<b>Densidad:</b> %{z:.4f}<extra></extra>"
             ),
         )
+    )
+
+    fig.update_layout(
+        **PlotConfig.BASE_LAYOUT,
+        margin={"t": 30, "b": 30, "l": 40, "r": 30},
+        autosize=True,
+    )
+    fig.update_xaxes(
+        title_text="Superficie (ha)",
+        **PlotConfig.AXIS_CONFIG,
+    )
+    fig.update_yaxes(
+        title_text="Semana",
+        **PlotConfig.AXIS_CONFIG,
+        range=[min(semanas) - 1, max(semanas) + 1],
+    )
 
     return fig
+
+
+def _crear_grafico_polar_kde(
+    kde_matrix: np.ndarray,
+    x_grid: np.ndarray,
+    semanas: np.ndarray,
+) -> go.Figure:
+    """
+    Crea el gráfico polar de la distribución KDE.
+
+    :param kde_matrix: Matriz KDE
+    :param x_grid: Grid de superficies
+    :param semanas: Array de semanas
+    :return: Figura de Plotly con el gráfico
+    """
+    n = kde_matrix.shape[0]
+    angles = np.linspace(0, 360, n, endpoint=False)
+
+    thetas = []
+    radius = []
+    intensities = []
+    hover = []
+
+    for i, theta in enumerate(angles):
+        sem_actual = semanas[i // 2] if i // 2 < len(semanas) else semanas[-1]
+        for j, superficie in enumerate(x_grid):
+            thetas.append(theta)
+            radius.append(superficie)
+            intensities.append(kde_matrix[i, j])
+            hover.append(sem_actual)
+
+    sizes = _calcular_tamaños_marcadores(radius)
+
+    fig = go.Figure(
+        go.Scatterpolar(
+            r=radius,
+            theta=thetas,
+            mode="markers",
+            marker={
+                "size": sizes,
+                "color": intensities,
+                "colorscale": "Hot",
+                "line_width": 0,
+                "opacity": 0.8,
+            },
+            customdata=hover,
+            hovertemplate=(
+                "<b>Semana:</b> %{customdata}<br>"
+                "<b>Superficie:</b> %{r:.0f} ha<br>"
+                "<b>Densidad:</b> %{marker.color:.4f}<extra></extra>"
+            ),
+        )
+    )
+
+    # Configuración de ejes polares
+    meses_angles = np.linspace(0, 360, 12, endpoint=False)
+    superficie_max = max(x_grid)
+
+    fig.update_layout(
+        **PlotConfig.BASE_LAYOUT,
+        margin={"t": 30, "b": 30, "l": 40, "r": 30},
+        autosize=True,
+        showlegend=False,
+        polar={
+            "bgcolor": "rgba(0,0,0,0)",
+            "angularaxis": {
+                "tickmode": "array",
+                "tickvals": meses_angles,
+                "ticktext": MESES,
+                "direction": "clockwise",
+                "rotation": 90,
+                "gridcolor": "rgba(255,255,255,0.1)",
+                "tickfont": {"size": 12, "color": "white"},
+            },
+            "radialaxis": {
+                "title": "Superficie (ha)",
+                "title_font": {"size": 10},
+                "tickfont": {"size": 9, "color": "rgba(255,255,255,0.6)"},
+                "gridcolor": "rgba(255,255,255,0.05)",
+                "angle": 45,
+                "showline": False,
+                "range": [0, superficie_max],
+            },
+        },
+    )
+
+    return fig
+
+
+def _calcular_tamaños_marcadores(
+    radius: list[float],
+    max_size: float = 8,
+    min_size: float = 0.1,
+) -> np.ndarray:
+    """
+    Calcula los tamaños de los marcadores de forma dinámica.
+
+    :param radius: Lista de valores de radio
+    :param max_size: Tamaño máximo del marcador
+    :param min_size: Tamaño mínimo del marcador
+    :return: Array con los tamaños calculados
+    """
+    r_array = np.array(radius)
+    r_min, r_max = r_array.min(), r_array.max()
+
+    if r_max > r_min:
+        return ((r_array - r_min) / (r_max - r_min)) ** 2 * (
+            max_size - min_size
+        ) + min_size
+
+    return np.full_like(r_array, (max_size + min_size) / 2)
