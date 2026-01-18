@@ -59,7 +59,7 @@ Interactive dashboard for exploring and visualizing historical data on forest fi
 
 ### Main Dashboard
 
-![Dashboard](imgs\dashboard.jpg)
+![Dashboard](imgs/dashboard.jpg)
 
 ### Dashboard with applied filters
 
