@@ -61,7 +61,45 @@ Interactive dashboard for exploring and visualizing historical data on forest fi
 
 ![Dashboard](imgs/dashboard.jpg)
 
+When no filter is selected, the base interface can be observed. In this state, all charts and KPIs are calculated with respect to the total data. The following components can be observed:
+
+  1. **KPIs**: relevant information about the territory. The following boxes appear:
+     - Total number of fires from January 1, 1983 to the last available day in the dataset, December 8, 2023.
+     - Burned area in the selected time.
+     - Year from the available ones in which the most area was burned.
+     - Trend of the last year with respect to the previous one in total number of fires.
+
+  2. **Territory map**: shows the total area affected by fires in each Spanish province. It uses a color scale where darker tones indicate greater burned area, allowing quick identification of the most punished zones.
+
+  3. **Affected area ranking**: horizontal bar chart visualizing the annual average of burned area. Without applied filters, it compares Autonomous Communities to identify which ones suffer larger fires on average. It shows the top 10 most affected communities. Each bar shows additional information when hovering over it.
+
+  4. **Cause evolution**: stacked area chart representing the variation of fire causes over the years. Facilitates the observation of temporal trends in the origin of incidents.
+
+  5. **Seasonal distribution**: polar chart showing burned area distributed month by month. Allows clear identification of fire seasonality, highlighting visually the high-risk campaign (summer months). It is also possible to select visualizing the chart as a conventional heatmap.
+
+  6. **Filter panel**: located at the bottom, allows personalizing analysis through:
+     - **Year range**: slider to select the study period.
+     - **Autonomous Community**: dropdown to center analysis on a specific region (zooming on the map and filtering the rest of charts).
+     - **Cause**: dropdown to filter data by fire origin.
+
 ### Dashboard with applied filters
+
+![Filtered dashboard](imgs/dashboard_filtrado.jpg)
+
+In this example, the dashboard state is shown when selecting a **year range** (not a single year) and filtering by a specific **Autonomous Community**. The interface responds in the following way:
+
+1. **Zoom and detail on the map**: The map automatically centers on the selected community. Additional layers are activated showing the exact location of all **major fires (>500 ha)** represented with icons, allowing exploration of singular events of great impact. Each fire shown on the map allows visualizing minimal own information when hovering over. The rest of filters (year range and fire causes) **do not affect** this visualization.
+
+2. **Graph recontextualization**:
+   - The **Ranking** changes hierarchical level: it stops comparing communities to compare the **provinces** composing the selected community, offering finer granularity.
+   - The **Cause chart** and **Seasonal chart** are recalculated using only filtered data, allowing analysis of specific patterns of that region during the chosen period (e.g., if intentional or negligence fires predominate in that zone).
+
+3. **Specific KPIs**: Top indicators reflect exclusively statistics for the selection, allowing dimensioning the problem at regional level.
+
+### Dashboard with a single year selected
+
+![One-Year dashboard]()
+
 
 ---
 
@@ -184,7 +222,9 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ---
 
-
+<a href="https://www.etsisi.upm.es/">
+  <img src="https://www.upm.es/gsfs/SFS11386"></img>
+</a>
 <p align="center">
   <sub>👨🏻‍💻 Yago Boleas Francisco (<a href="https://github.com/yabol02">@yabol02</a>)</sub>
 </p>

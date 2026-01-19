@@ -59,9 +59,45 @@ Dashboard interactivo para la exploración y visualización de datos históricos
 
 ### Dashboard principal
 
-![Dashboard](imgs\dashboard.jpg)
+![Dashboard](imgs/dashboard.jpg)
+
+Cuando no se selecciona ningún filtro para el gráfico se puede observar la interfaz base. En esta se calculan todos los gráficos y KPIs respecto al total de los datos. Se pueden observar los siguientes componentes:
+  1. **KPIs**: información relevante sobre el territorio. Aparecen los siguientes cuadros:
+      - Número total de incedios desde el 1 de enero de 1983 hasta el último día disponible en el dataset, el 8 de diciembre del 2023.
+      - Área quemada en el tiempo seleccionado
+      - Año de los disponibles en el que más superficie se quemó
+      - Tendencia del último año respecto al anterior en número total de incendios
+
+  2. **Mapa del territorio**: muestra la superficie total afectada por incendios en cada provincia española. Utiliza una escala de colores donde los tonos más oscuros indican mayor superficie quemada, permitiendo identificar rápidamente las zonas más castigadas.
+  
+  3. **Ranking de superficie afectada**: gráfico de barras horizontal que visualiza la media anual de superficie quemada. Sin filtros aplicados, compara las Comunidades Autónomas para identificar cuáles sufren incendios de mayor magnitud en promedio. Muestra el top 10 de las comunidades más afectadas. Cada barra muetra información adicional cuando se pasa el ratón por encima.
+
+  4. **Evolución de causas**: gráfico de áreas apiladas que representa la variación de las causas de los incendios a lo largo de los años. Facilita la observación de tendencias temporales en el origen de los siniestros.
+
+  5. **Distribución estacional**: gráfico polar que muestra la superficie quemada distribuida mes a mes. Permite identificar claramente la estacionalidad de los incendios, destacando visualmente la campaña de alto riesgo (meses de verano). Se puede seleccionar también visualizar el gráfico como un mapa de calor convencional.
+
+  6. **Panel de filtros**: situado en la parte inferior, permite personalizar el análisis mediante:
+      - **Rango de años**: slider para seleccionar el periodo de estudio.
+      - **Comunidad Autónoma**: desplegable para centrar el análisis en una región específica (haciendo zoom en el mapa y filtrando el resto de gráficos).
+      - **Causa**: desplegable para filtrar los datos por el origen del incendio. 
 
 ### Dashboard con filtros aplicados
+
+![Dashboard filtrado](imgs/dashboard_filtrado.jpg)
+
+En este ejemplo se muestra el estado del dashboard al seleccionar un **rango de años** (no un año único) y filtrar por una **Comunidad Autónoma** específica. La interfaz responde de la siguiente manera:
+
+1. **Zoom y detalle en el mapa**: El mapa se centra automáticamente en la comunidad seleccionada. Se activan capas adicionales que muestran la ubicación exacta de todos los **grandes incendios (>500 ha)** representados con iconos, permitiendo explorar eventos singulares de gran impacto. Cada incendio mostrado en el mapa permite visualizar una mínima información propia cuando se pasa por encima el ratón. El resto de filtros (rango de años y causas de los incendios) **no afectan** en esta visualización.
+
+2. **Recontextualización de los gráficos**:
+   - El **Ranking** cambia de nivel jerárquico: deja de comparar comunidades para comparar las **provincias** que componen la comunidad seleccionada, ofreciendo una granularidad más fina.
+   - El **Gráfico de causas** y el **Gráfico estacional** se recalculan utilizando únicamente los datos filtrados, permitiendo analizar los patrones específicos de esa región durante el periodo elegido (por ejemplo, si en esa zona predominan los incendios intencionados o por negligencia).
+
+3. **KPIs Específicos**: Los indicadores de la parte superior reflejan exclusivamente las estadísticas de la selección, permitiendo dimensionar el problema a nivel regional.
+
+### Dashboard con un único año seleccionado
+
+![Dashboard de un año]()
 
 ---
 
@@ -184,7 +220,9 @@ Este proyecto está bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE)
 
 ---
 
-
+<a href="https://www.etsisi.upm.es/">
+  <img src="https://www.upm.es/gsfs/SFS11386"></img>
+</a>
 <p align="center">
   <sub>👨🏻‍💻 Yago Boleas Francisco (<a href="https://github.com/yabol02">@yabol02</a>)</sub>
 </p>
