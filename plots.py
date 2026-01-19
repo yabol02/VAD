@@ -834,9 +834,12 @@ def _crear_grafico_cartesiano_kde(
         )
     )
 
+    meses_ticks = (
+        np.linspace(min(semanas) - 1, max(semanas) + 1, 12, endpoint=False) + 2
+    )
     fig.update_layout(
         **PlotConfig.BASE_LAYOUT,
-        margin={"t": 30, "b": 30, "l": 40, "r": 30},
+        margin={"t": 30, "b": 30, "l": 60, "r": 30},
         autosize=True,
     )
     fig.update_xaxes(
@@ -844,9 +847,17 @@ def _crear_grafico_cartesiano_kde(
         **PlotConfig.AXIS_CONFIG,
     )
     fig.update_yaxes(
-        title_text="Semana",
+        title_text="Mes",
         **PlotConfig.AXIS_CONFIG,
+        tickmode="array",
+        tickvals=meses_ticks,
+        ticktext=MESES,
         range=[min(semanas) - 1, max(semanas) + 1],
+        autorange=(
+            "reversed"
+            if PlotConfig.BASE_LAYOUT.get("yaxis", {}).get("autorange") == "reversed"
+            else True
+        ),
     )
 
     return fig
@@ -943,7 +954,7 @@ def _crear_grafico_polar_kde(
 
 def _calcular_tamaños_marcadores(
     radius: list[float],
-    max_size: float = 8,
+    max_size: float = 9,
     min_size: float = 0.1,
 ) -> np.ndarray:
     """
