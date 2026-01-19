@@ -93,7 +93,7 @@ def create_graph_card(
     figure: Optional[go.Figure] = None,
     graph_config: Optional[dict] = None,
     graph_style: Optional[dict] = None,
-    header_extra: Optional[list] = None,
+    graph_overlay: Optional[html.Div] = None,
 ) -> dbc.Card:
     """
     Crea una tarjeta con gráfico reutilizable.
@@ -104,40 +104,61 @@ def create_graph_card(
     :param figure: Figura de Plotly inicial
     :param graph_config: Configuración adicional del gráfico
     :param graph_style: Estilos CSS del gráfico
-    :param header_extra: Componentes adicionales en el header
+    :param graph_overlay: Componente HTML para superponer sobre el gráfico
     :return: Tarjeta de Dash con el gráfico
     """
-    header_content = [
-        html.Span(header_text, style={"fontWeight": "600", "fontSize": "1.4rem"})
-    ]
-
-    if header_extra:
-        header_content.extend(header_extra)
 
     header = dbc.CardHeader(
         html.Div(
-            header_content,
+            [
+                html.Span(
+                    header_text,
+                    style={
+                        "fontWeight": "600",
+                        "fontSize": "1.4rem",
+                        "textAlign": "center",
+                        "display": "flex",
+                        "flexDirection": "column",
+                        "alignItems": "center",
+                    },
+                )
+            ],
+        )
+    )
+
+    graph_component = dcc.Graph(
+        id=graph_id,
+        figure=figure,
+        config=graph_config or {},
+        style=graph_style or {},
+    )
+
+    body_content = [graph_component]
+
+    if graph_overlay:
+        overlay_styled = html.Div(
+            graph_overlay,
             style={
-                "textAlign": "center",
-                "display": "flex",
-                "flexDirection": "column",
-                "alignItems": "center",
+                "position": "absolute",
+                "top": "10px",
+                "right": "10px",
+                "zIndex": "100",
+                "backgroundColor": "rgba(255,255,255,0.8)",
+                "borderRadius": "5px",
+                "padding": "5px",
             },
         )
-        if header_extra
-        else header_content[0]
-    )
+        body_content.append(overlay_styled)
 
     return dbc.Card(
         [
             header,
             dbc.CardBody(
-                dcc.Graph(
-                    id=graph_id,
-                    figure=figure,
-                    config=graph_config or {},
-                    style=graph_style or {},
-                )
+                html.Div(
+                    body_content,
+                    style={"position": "relative", "height": "100%", "width": "100%"},
+                ),
+                # style={"padding": "0"}  <-- Opcional
             ),
         ]
     )
@@ -278,8 +299,12 @@ def _build_secondary_charts() -> dbc.Row:
         id="toggle-polar-distribucion",
         label="Vista Polar",
         value=True,
-        className="mt-2",
-        style={"fontSize": "0.9rem"},
+        className="mt-2 custom-switch",
+        style={
+            "fontSize": "0.9rem",
+            "color": "gray",
+            "backgroundColor": "transparent",
+        },
     )
 
     return dbc.Row(
@@ -306,7 +331,7 @@ def _build_secondary_charts() -> dbc.Row:
                         fuegos, polar=True
                     ),
                     graph_config={"displayModeBar": False},
-                    header_extra=[polar_switch],
+                    graph_overlay=[polar_switch],
                 ),
                 xs=12,
                 lg=6,
@@ -564,4 +589,4 @@ def actualizar_dashboard(
 
 
 if __name__ == "__main__":
-    app.run(debug=False)
+    app.run(debug=True)

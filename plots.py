@@ -911,6 +911,8 @@ def _crear_grafico_polar_kde(
     fig.update_layout(
         **PlotConfig.BASE_LAYOUT,
         margin={"t": 30, "b": 30, "l": 40, "r": 30},
+        height=400,
+        width=None,
         autosize=True,
         showlegend=False,
         polar={
