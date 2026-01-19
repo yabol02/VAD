@@ -95,10 +95,6 @@ En este ejemplo se muestra el estado del dashboard al seleccionar un **rango de 
 
 3. **KPIs Específicos**: Los indicadores de la parte superior reflejan exclusivamente las estadísticas de la selección, permitiendo dimensionar el problema a nivel regional.
 
-### Dashboard con un único año seleccionado
-
-![Dashboard de un año]()
-
 ---
 
 ## 🚀 Instalación

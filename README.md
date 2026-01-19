@@ -96,11 +96,6 @@ In this example, the dashboard state is shown when selecting a **year range** (n
 
 3. **Specific KPIs**: Top indicators reflect exclusively statistics for the selection, allowing dimensioning the problem at regional level.
 
-### Dashboard with a single year selected
-
-![One-Year dashboard]()
-
-
 ---
 
 ## 🚀 Installation
